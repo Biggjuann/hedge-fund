@@ -240,12 +240,21 @@ class WalkForwardOptimizer:
                             grid_values,
                             key=lambda x: abs(x - median_params[key]),
                         )
+                elif all(isinstance(v, list) for v in values):
+                    # For list params (e.g., lookbacks): pick from the best
+                    median_params[key] = values[len(values) // 2]
                 else:
-                    # Mode for categorical
+                    # Mode for categorical — convert unhashable to str
                     from collections import Counter
 
-                    counter = Counter(values)
-                    median_params[key] = counter.most_common(1)[0][0]
+                    str_values = [str(v) for v in values]
+                    counter = Counter(str_values)
+                    most_common_str = counter.most_common(1)[0][0]
+                    # Map back to original value
+                    for v, s in zip(values, str_values):
+                        if s == most_common_str:
+                            median_params[key] = v
+                            break
 
         return median_params
 

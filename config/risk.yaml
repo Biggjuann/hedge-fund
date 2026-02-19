@@ -13,12 +13,13 @@ portfolio:
     risk_scale_at_extreme_corr: 0.30
 
 drawdown_ladder:
-  - threshold: 0.05                    # DD >= 5%
-    risk_multiplier: 0.75
-  - threshold: 0.08                    # DD >= 8%
-    risk_multiplier: 0.50
-  - threshold: 0.10                    # DD >= 10%: flat + cooldown
-    risk_multiplier: 0.00
+  thresholds:
+    - threshold: 0.05                  # DD >= 5%
+      risk_multiplier: 0.75
+    - threshold: 0.08                  # DD >= 8%
+      risk_multiplier: 0.50
+    - threshold: 0.10                  # DD >= 10%: flat + cooldown
+      risk_multiplier: 0.00
   cooldown_days: 10
   recovery_window: 20                  # days of stable performance to re-enter
   recovery_min_sharpe: 0.0             # rolling Sharpe must be >= 0

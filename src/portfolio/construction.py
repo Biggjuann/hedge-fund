@@ -86,14 +86,15 @@ class RiskParityAllocator:
                 scale = risk_budget * self.portfolio_vol_target / strat_vol.clip(
                     lower=0.01
                 )
+                # Reindex to common_idx, forward-fill for dates with no return
+                scale = scale.reindex(common_idx).ffill().fillna(risk_budget)
             else:
                 scale = pd.Series(risk_budget, index=common_idx)
 
             for col in weights.columns:
                 if col in combined.columns:
-                    combined.loc[common_idx, col] += (
-                        weights.loc[common_idx, col] * scale.loc[common_idx]
-                    )
+                    w_aligned = weights[col].reindex(common_idx).fillna(0.0)
+                    combined[col] += w_aligned * scale
 
         # Apply portfolio-level vol target
         combined = self._apply_portfolio_vol_target(combined, common_idx)

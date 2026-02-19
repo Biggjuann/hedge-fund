@@ -141,12 +141,11 @@ class Pipeline:
 
         thresholds = [
             {"threshold": t["threshold"], "risk_multiplier": t["risk_multiplier"]}
-            for t in dc
-            if isinstance(t, dict)
+            for t in dc.get("thresholds", [])
         ]
 
-        cooldown = dc.get("cooldown_days", 10) if isinstance(dc, dict) else 10
-        recovery = dc.get("recovery_window", 20) if isinstance(dc, dict) else 20
+        cooldown = dc.get("cooldown_days", 10)
+        recovery = dc.get("recovery_window", 20)
 
         self.drawdown_ladder = DrawdownLadder(
             thresholds=thresholds if thresholds else None,

@@ -188,6 +188,6 @@ def compute_transaction_costs(
             )
 
             # Store as fraction of equity
-            costs.iloc[i][inst] = breakdown.total / equity if equity > 0 else 0
+            costs.iloc[i, costs.columns.get_loc(inst)] = breakdown.total / equity if equity > 0 else 0
 
     return costs
