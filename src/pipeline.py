@@ -89,7 +89,7 @@ class Pipeline:
         self._init_validation()
         self._init_reporting()
 
-    def _init_strategies(self) -> None:
+    def _init_strategies(self, symbol: str = "ES") -> None:
         """Initialize strategy instances from config."""
         sc = self.strategy_config["strategies"]
 
@@ -101,6 +101,7 @@ class Pipeline:
                 target_vol=sc["S1_trend"]["target_vol_per_instrument"],
                 vol_lookback=sc["S1_trend"]["vol_lookback"],
                 rebalance_freq=sc["S1_trend"]["rebalance_frequency"],
+                symbol=symbol,
             )
 
         if sc["S2_carry"]["enabled"]:
@@ -109,6 +110,7 @@ class Pipeline:
                 target_vol=sc["S2_carry"]["target_vol_per_instrument"],
                 vol_lookback=sc["S2_carry"]["vol_lookback"],
                 rebalance_freq=sc["S2_carry"]["rebalance_frequency"],
+                symbol=symbol,
             )
 
         if sc["S3_vol_breakout"]["enabled"]:
@@ -125,6 +127,7 @@ class Pipeline:
                 target_vol=sc["S3_vol_breakout"]["target_vol_per_instrument"],
                 vol_lookback=sc["S3_vol_breakout"]["vol_lookback"],
                 rebalance_freq=sc["S3_vol_breakout"]["rebalance_frequency"],
+                symbol=symbol,
             )
 
     def _init_portfolio(self) -> None:
@@ -146,11 +149,15 @@ class Pipeline:
 
         cooldown = dc.get("cooldown_days", 10)
         recovery = dc.get("recovery_window", 20)
+        recovery_sharpe = dc.get("recovery_min_sharpe", -0.5)
+        max_cooldown = dc.get("max_cooldown_days", 30)
 
         self.drawdown_ladder = DrawdownLadder(
             thresholds=thresholds if thresholds else None,
             cooldown_days=cooldown,
             recovery_window=recovery,
+            recovery_min_sharpe=recovery_sharpe,
+            max_cooldown_days=max_cooldown,
         )
 
         cc = pc["correlation_haircuts"]
@@ -172,6 +179,12 @@ class Pipeline:
             stress_margin_multiplier=mc["stress_margin_multiplier"],
             leverage_cap_under_stress=mc["leverage_cap_under_stress"],
         )
+
+        # Regime-adaptive scaling config
+        rs = self.risk_config.get("regime_scaling", {})
+        self.regime_scaling_enabled = rs.get("enabled", False)
+        self.regime_scaling_factor = rs.get("scaling_factor", 0.5)
+        self.regime_min_scale = rs.get("min_scale", 0.5)
 
         ec = self.risk_config["execution"]["cost_model"]
         self.cost_model = CostModel(
@@ -320,16 +333,19 @@ class Pipeline:
         """
         signals = {}
 
-        for strat_name, strategy in self.strategies.items():
-            for symbol, d in data.items():
-                params = (
-                    params_override.get(strat_name) if params_override else None
-                )
+        # v1: single instrument — use first symbol directly (no inner loop)
+        first_symbol = list(data.keys())[0]
+        d = data[first_symbol]
 
-                sig = strategy.generate_signals(
-                    d["daily"], d["returns"], params
-                )
-                signals[strat_name] = sig
+        for strat_name, strategy in self.strategies.items():
+            params = (
+                params_override.get(strat_name) if params_override else None
+            )
+
+            sig = strategy.generate_signals(
+                d["daily"], d["returns"], params
+            )
+            signals[strat_name] = sig
 
         return signals
 
@@ -367,6 +383,10 @@ class Pipeline:
         if not data:
             raise ValueError("No data loaded. Check instrument configs and data files.")
 
+        # Re-init strategies with the actual symbol name
+        first_symbol = list(data.keys())[0]
+        self._init_strategies(symbol=first_symbol)
+
         # 2. Generate strategy signals
         print("\n[2/7] Generating strategy signals...")
         signals = self.run_strategies(data)
@@ -389,6 +409,17 @@ class Pipeline:
             strategy_weights, strategy_returns_for_alloc
         )
 
+        # Regime-adaptive position sizing: scale down in high-risk regimes
+        regime_labels = self.regime_tagger.tag_all(d["daily"], d["returns"])
+        if self.regime_scaling_enabled:
+            composite = regime_labels.composite_risk.reindex(
+                combined_weights.index
+            ).fillna(0.0)
+            regime_scale = (
+                1.0 - self.regime_scaling_factor * composite
+            ).clip(lower=self.regime_min_scale)
+            combined_weights = combined_weights.multiply(regime_scale, axis=0)
+
         # 4. Backtest with costs
         print("\n[4/7] Running backtest...")
         engine = VectorizedBacktestEngine(
@@ -405,13 +436,21 @@ class Pipeline:
 
         # Apply risk overlays
         print("  Applying risk overlays...")
-        regime_labels = self.regime_tagger.tag_all(
-            d["daily"], d["returns"]
-        )
+
+        # Compute average pairwise correlation of strategy returns
+        avg_corr = None
+        if len(strategy_returns_for_alloc) >= 2:
+            strat_ret_df = pd.DataFrame(strategy_returns_for_alloc)
+            strat_ret_df = strat_ret_df.reindex(combined_weights.index).fillna(0.0)
+            avg_corr = rolling_ewma_correlation_series(
+                strat_ret_df,
+                com=self.risk_config["portfolio"]["correlation_lookback"],
+            )
 
         adjusted_weights = self.risk_overlay.apply(
             combined_weights,
             result.equity_curve,
+            avg_corr=avg_corr,
         )
 
         # Re-run with adjusted weights
@@ -497,17 +536,39 @@ class Pipeline:
         returns = data_dict["returns"]
         meta = data_dict["metadata"]
 
-        # Define strategy function for WFO
+        # Define strategy function for WFO — maps params to each strategy type
         def strategy_fn(
             data_slice: pd.DataFrame,
             returns_slice: pd.Series,
             params: dict,
         ) -> pd.Series:
-            """Run all strategies with given params and return combined returns."""
+            """Run all strategies with per-strategy params and return combined returns."""
             all_weights = []
 
             for strat_name, strategy in self.strategies.items():
-                sig = strategy.generate_signals(data_slice, returns_slice, params)
+                # Map global WFO params to per-strategy params
+                strat_params = {}
+                if "S1_trend" in strat_name:
+                    if "lookbacks" in params:
+                        strat_params["lookbacks"] = params["lookbacks"]
+                    if "target_vol" in params:
+                        strat_params["target_vol"] = params["target_vol"]
+                elif "S2_carry" in strat_name:
+                    if "carry_lookback" in params:
+                        strat_params["carry_lookback"] = params["carry_lookback"]
+                    if "target_vol" in params:
+                        strat_params["target_vol"] = params["target_vol"]
+                elif "S3_vol_breakout" in strat_name:
+                    if "range_lookback" in params:
+                        strat_params["range_lookback"] = params["range_lookback"]
+                    if "atr_lookback" in params:
+                        strat_params["atr_lookback"] = params["atr_lookback"]
+                    if "target_vol" in params:
+                        strat_params["target_vol"] = params["target_vol"]
+
+                sig = strategy.generate_signals(
+                    data_slice, returns_slice, strat_params or None
+                )
                 all_weights.append(sig.raw_weights.iloc[:, 0])
 
             if all_weights:
@@ -516,13 +577,18 @@ class Pipeline:
                 return strat_returns
             return pd.Series(0.0, index=data_slice.index)
 
-        # Parameter grid (conservative)
+        # Parameter grid — covers per-strategy params
         param_grid = [
-            {"lookbacks": [21, 63, 252], "target_vol": 0.08},
-            {"lookbacks": [21, 63, 252], "target_vol": 0.10},
-            {"lookbacks": [21, 63, 252], "target_vol": 0.12},
-            {"lookbacks": [21, 63, 126], "target_vol": 0.10},
-            {"lookbacks": [42, 126, 252], "target_vol": 0.10},
+            {"lookbacks": [21, 63, 252], "target_vol": 0.08,
+             "carry_lookback": 63, "range_lookback": 20, "atr_lookback": 14},
+            {"lookbacks": [21, 63, 252], "target_vol": 0.10,
+             "carry_lookback": 63, "range_lookback": 20, "atr_lookback": 14},
+            {"lookbacks": [21, 63, 252], "target_vol": 0.12,
+             "carry_lookback": 63, "range_lookback": 20, "atr_lookback": 14},
+            {"lookbacks": [21, 63, 126], "target_vol": 0.10,
+             "carry_lookback": 42, "range_lookback": 15, "atr_lookback": 10},
+            {"lookbacks": [42, 126, 252], "target_vol": 0.10,
+             "carry_lookback": 126, "range_lookback": 30, "atr_lookback": 20},
         ]
 
         folds = self.wfo.run(daily, returns, strategy_fn, param_grid)

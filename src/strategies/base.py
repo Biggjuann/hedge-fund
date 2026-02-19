@@ -52,11 +52,13 @@ class BaseStrategy(ABC):
         target_vol: float = 0.10,
         vol_lookback: int = 60,
         rebalance_freq: str = "monthly",
+        symbol: str = "ES",
     ):
         self.name = name
         self.target_vol = target_vol
         self.vol_lookback = vol_lookback
         self.rebalance_freq = rebalance_freq
+        self.symbol = symbol
         self._n_params_tested: int = 0  # for multiple testing tracking
 
     @abstractmethod
@@ -115,10 +117,13 @@ class BaseStrategy(ABC):
         tv = target_vol or self.target_vol
         vol = ewma_volatility(returns, com=self.vol_lookback)
 
-        # Avoid division by zero / extreme leverage
-        vol_safe = vol.clip(lower=tv * 0.1)
+        # Floor at 50% of target vol → max 2x scaling (not 10x)
+        vol_safe = vol.clip(lower=tv * 0.5)
 
         weights = signals * (tv / vol_safe)
+
+        # Cap position at 2x to prevent leverage bombs
+        weights = weights.clip(-2.0, 2.0)
 
         return weights
 

@@ -2,8 +2,8 @@
 
 portfolio:
   allocation_method: risk_parity       # equal vol contribution across strategies
-  portfolio_vol_target: 0.12           # 12% annualized
-  max_leverage: 4.0                    # gross leverage cap
+  portfolio_vol_target: 0.22           # 22% annualized — S&P-beating with margin
+  max_leverage: 6.0                    # gross leverage cap
   correlation_lookback: 63             # days for correlation estimation
 
   correlation_haircuts:
@@ -14,15 +14,23 @@ portfolio:
 
 drawdown_ladder:
   thresholds:
-    - threshold: 0.05                  # DD >= 5%
+    - threshold: 0.05                  # DD >= 5%: reduce to 75%
       risk_multiplier: 0.75
-    - threshold: 0.08                  # DD >= 8%
+    - threshold: 0.08                  # DD >= 8%: reduce to 50%
       risk_multiplier: 0.50
-    - threshold: 0.10                  # DD >= 10%: flat + cooldown
+    - threshold: 0.10                  # DD >= 10%: reduce to 25%
+      risk_multiplier: 0.25
+    - threshold: 0.12                  # DD >= 12%: flat + cooldown
       risk_multiplier: 0.00
   cooldown_days: 10
   recovery_window: 20                  # days of stable performance to re-enter
-  recovery_min_sharpe: 0.0             # rolling Sharpe must be >= 0
+  recovery_min_sharpe: -0.5            # relaxed: allow re-entry during recovery
+  max_cooldown_days: 30                # hard cap — force re-entry after 30 days
+
+regime_scaling:
+  enabled: false
+  scaling_factor: 0.3                  # how aggressively to scale down in high-risk regimes
+  min_scale: 0.7                       # minimum scale factor (never reduce below 70%)
 
 margin:
   max_utilization: 0.35                # max 35% of equity as margin

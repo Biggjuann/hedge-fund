@@ -39,12 +39,14 @@ class VolBreakoutStrategy(BaseStrategy):
         target_vol: float = 0.05,  # small baseline per spec
         vol_lookback: int = 60,
         rebalance_freq: str = "daily",
+        symbol: str = "ES",
     ):
         super().__init__(
             name="S3_vol_breakout",
             target_vol=target_vol,
             vol_lookback=vol_lookback,
             rebalance_freq=rebalance_freq,
+            symbol=symbol,
         )
         self.range_lookback = range_lookback
         self.atr_lookback = atr_lookback
@@ -197,8 +199,8 @@ class VolBreakoutStrategy(BaseStrategy):
         max_weight = self.max_loss_per_trade_pct / vol.clip(lower=0.001)
         raw_weights = raw_weights.clip(lower=-max_weight, upper=max_weight)
 
-        signal_out = pd.DataFrame({"ES": signal}, index=prices.index)
-        weight_out = pd.DataFrame({"ES": raw_weights}, index=prices.index)
+        signal_out = pd.DataFrame({self.symbol: signal}, index=prices.index)
+        weight_out = pd.DataFrame({self.symbol: raw_weights}, index=prices.index)
 
         return StrategySignal(
             signals=signal_out,

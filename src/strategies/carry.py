@@ -39,12 +39,14 @@ class CarryStrategy(BaseStrategy):
         target_vol: float = 0.10,
         vol_lookback: int = 60,
         rebalance_freq: str = "monthly",
+        symbol: str = "ES",
     ):
         super().__init__(
             name="S2_carry",
             target_vol=target_vol,
             vol_lookback=vol_lookback,
             rebalance_freq=rebalance_freq,
+            symbol=symbol,
         )
         self.carry_lookback = carry_lookback
         self.rank_long_quantile = rank_long_quantile
@@ -55,20 +57,24 @@ class CarryStrategy(BaseStrategy):
         close: pd.Series,
         lookback: int,
     ) -> pd.Series:
-        """Estimate carry proxy for a single instrument from price data.
+        """Estimate carry signal for a single instrument.
 
-        Uses the annualized roll yield as a proxy for carry:
-        carry ~ (close[t-1] - close[t-1-lookback]) / close[t-1-lookback] * (252/lookback)
+        For single-instrument mode, uses short-term mean-reversion as the carry
+        signal — complementary to the trend strategy which captures medium/long
+        momentum. The signal measures deviation from the rolling mean,
+        expecting reversion.
 
-        This approximates the return from holding the near contract
-        vs the deferred, which is the term structure slope.
-
-        CAUSALITY: uses shift(1) so carry at t uses data up to t-1.
+        CAUSALITY: uses shift(1) so signal at t uses data up to t-1.
         """
-        # Rolling return as carry proxy, shifted for causality
-        carry = (close.shift(1) / close.shift(1 + lookback) - 1) * (
-            252 / lookback
-        )
+        # Short-term deviation from rolling mean (mean-reversion proxy)
+        # When price is below its rolling mean → expect reversion up → long
+        # When price is above → expect reversion down → short
+        rolling_mean = close.rolling(lookback, min_periods=lookback // 2).mean()
+        deviation = (close - rolling_mean) / rolling_mean
+
+        # Shift for causality
+        carry = -deviation.shift(1)  # negative: contrarian (buy below mean)
+
         return carry
 
     def generate_signals(
@@ -112,12 +118,14 @@ class CarryStrategy(BaseStrategy):
         # Single instrument carry: directional
         carry = self.estimate_carry_single_instrument(close, carry_lb)
 
-        # Normalize carry to [-1, +1] using expanding rank/percentile
-        # CAUSALITY: expanding (not full-sample) percentile
-        carry_pctile = carry.expanding(min_periods=60).rank(pct=True)
-        # Map [0, 1] percentile to [-1, +1] signal
-        signal = (carry_pctile - 0.5) * 2.0
-        signal = signal.clip(-1.0, 1.0)
+        # Normalize carry to [-1, +1] using rolling z-score
+        # CAUSALITY: carry already uses shift(1)
+        roll_window = min(504, max(carry_lb * 4, 252))
+        carry_mean = carry.rolling(roll_window, min_periods=60).mean()
+        carry_std = carry.rolling(roll_window, min_periods=60).std().clip(lower=0.001)
+        carry_zscore = (carry - carry_mean) / carry_std
+        # Scale z-score to [-1, +1]: divide by 2 so ±2σ maps to ±1
+        signal = (carry_zscore / 2.0).clip(-1.0, 1.0)
 
         # Apply rebalance
         signal = self.apply_rebalance_mask(signal)
@@ -125,8 +133,8 @@ class CarryStrategy(BaseStrategy):
         # Vol-scale
         raw_weights = self.vol_scale_weights(signal, returns, target_vol)
 
-        signal_out = pd.DataFrame({"ES": signal}, index=prices.index)
-        weight_out = pd.DataFrame({"ES": raw_weights}, index=prices.index)
+        signal_out = pd.DataFrame({self.symbol: signal}, index=prices.index)
+        weight_out = pd.DataFrame({self.symbol: raw_weights}, index=prices.index)
 
         return StrategySignal(
             signals=signal_out,

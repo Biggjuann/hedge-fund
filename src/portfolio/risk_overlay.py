@@ -46,18 +46,20 @@ class DrawdownLadder:
         thresholds: list[dict] | None = None,
         cooldown_days: int = 10,
         recovery_window: int = 20,
-        recovery_min_sharpe: float = 0.0,
+        recovery_min_sharpe: float = -0.5,
+        max_cooldown_days: int = 30,
     ):
         if thresholds is None:
             thresholds = [
-                {"threshold": 0.05, "risk_multiplier": 0.75},
-                {"threshold": 0.08, "risk_multiplier": 0.50},
-                {"threshold": 0.10, "risk_multiplier": 0.00},
+                {"threshold": 0.08, "risk_multiplier": 0.75},
+                {"threshold": 0.12, "risk_multiplier": 0.50},
+                {"threshold": 0.15, "risk_multiplier": 0.00},
             ]
         self.thresholds = sorted(thresholds, key=lambda x: x["threshold"])
         self.cooldown_days = cooldown_days
         self.recovery_window = recovery_window
         self.recovery_min_sharpe = recovery_min_sharpe
+        self.max_cooldown_days = max_cooldown_days
 
     def compute_risk_multipliers(
         self,
@@ -80,21 +82,38 @@ class DrawdownLadder:
         multipliers = pd.Series(1.0, index=equity_curve.index)
         peak = equity_curve.iloc[0]
         cooldown_remaining = 0
+        total_cooldown_elapsed = 0
         in_cooldown = False
+        cooldown_start_idx = 0
 
         for i in range(len(equity_curve)):
             current = equity_curve.iloc[i]
-            peak = max(peak, current)
+
+            if not in_cooldown:
+                peak = max(peak, current)
 
             dd_pct = (peak - current) / peak if peak > 0 else 0.0
 
             if in_cooldown:
                 cooldown_remaining -= 1
+                total_cooldown_elapsed += 1
+
+                # Hard max cooldown cap — force re-entry
+                if total_cooldown_elapsed >= self.max_cooldown_days:
+                    in_cooldown = False
+                    peak = current  # reset peak to avoid immediate re-trigger
+                    multipliers.iloc[i] = 1.0
+                    continue
+
                 if cooldown_remaining <= 0:
-                    # Check recovery: rolling returns must show stabilization
-                    if i >= self.recovery_window:
+                    # Recovery window starts AFTER cooldown ends (not during DD)
+                    window_start = i
+                    window_end = i
+                    # Look at returns from cooldown end onward (the last few days)
+                    lookback = min(self.recovery_window, i - cooldown_start_idx)
+                    if lookback >= 5:
                         recent_returns = equity_curve.iloc[
-                            max(0, i - self.recovery_window) : i + 1
+                            max(0, i - lookback) : i + 1
                         ].pct_change().dropna()
                         if len(recent_returns) > 0:
                             mean_ret = recent_returns.mean()
@@ -106,13 +125,9 @@ class DrawdownLadder:
                             )
                             if rolling_sharpe >= self.recovery_min_sharpe:
                                 in_cooldown = False
-                                peak = current  # reset peak after recovery
-                            else:
-                                cooldown_remaining = self.cooldown_days
-                        else:
-                            in_cooldown = False
-                    else:
-                        in_cooldown = False
+                                peak = current  # reset peak on re-entry
+                                multipliers.iloc[i] = 1.0
+                                continue
 
                 if in_cooldown:
                     multipliers.iloc[i] = 0.0
@@ -127,6 +142,8 @@ class DrawdownLadder:
             if mult == 0.0:
                 in_cooldown = True
                 cooldown_remaining = self.cooldown_days
+                total_cooldown_elapsed = 0
+                cooldown_start_idx = i
 
             multipliers.iloc[i] = mult
 

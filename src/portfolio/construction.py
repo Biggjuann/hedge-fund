@@ -57,14 +57,16 @@ class RiskParityAllocator:
         if n_strategies == 0:
             raise ValueError("No strategies provided")
 
-        # Per-strategy risk budget = 1/N
-        risk_budget = 1.0 / n_strategies
-
         # Get common index
         all_indices = [w.index for w in strategy_weights.values()]
         common_idx = all_indices[0]
         for idx in all_indices[1:]:
             common_idx = common_idx.intersection(idx)
+
+        # Compute inverse-vol budgets (proportional to realized vol, with floor)
+        risk_budgets = self._compute_inverse_vol_budgets(
+            strategy_returns, common_idx
+        )
 
         # Collect all instrument columns
         all_instruments = set()
@@ -77,27 +79,18 @@ class RiskParityAllocator:
             0.0, index=common_idx, columns=all_instruments
         )
 
-        # Scale each strategy by risk budget and add
+        # Weight strategies by inverse-vol budget — active strategies get more budget
         for strat_name, weights in strategy_weights.items():
-            strat_ret = strategy_returns.get(strat_name)
-            if strat_ret is not None:
-                strat_vol = ewma_volatility(strat_ret, com=self.vol_lookback)
-                # Scale factor: risk_budget * (target_vol / strat_vol)
-                scale = risk_budget * self.portfolio_vol_target / strat_vol.clip(
-                    lower=0.01
-                )
-                # Reindex to common_idx, forward-fill for dates with no return
-                scale = scale.reindex(common_idx).ffill().fillna(risk_budget)
-            else:
-                scale = pd.Series(risk_budget, index=common_idx)
-
+            budget = risk_budgets.get(strat_name, 1.0 / n_strategies)
             for col in weights.columns:
                 if col in combined.columns:
                     w_aligned = weights[col].reindex(common_idx).fillna(0.0)
-                    combined[col] += w_aligned * scale
+                    combined[col] += w_aligned * budget
 
-        # Apply portfolio-level vol target
-        combined = self._apply_portfolio_vol_target(combined, common_idx)
+        # Apply portfolio-level vol target ONCE at the end
+        combined = self._apply_portfolio_vol_target(
+            combined, common_idx, strategy_returns, risk_budgets
+        )
 
         # Apply leverage cap
         gross_leverage = combined.abs().sum(axis=1)
@@ -110,22 +103,86 @@ class RiskParityAllocator:
 
         return combined
 
+    def _compute_inverse_vol_budgets(
+        self,
+        strategy_returns: dict[str, pd.Series],
+        index: pd.DatetimeIndex,
+        floor: float = 0.10,
+    ) -> dict[str, float]:
+        """Compute risk budgets proportional to realized vol.
+
+        Active strategies (higher vol) get more budget. Inactive strategies
+        (near-zero vol) get a floor allocation to avoid zero weight.
+
+        Parameters
+        ----------
+        strategy_returns : dict
+            Maps strategy name -> Series of returns.
+        index : pd.DatetimeIndex
+            Common index for alignment.
+        floor : float
+            Minimum budget per strategy (default 2%).
+
+        Returns
+        -------
+        dict mapping strategy name -> risk budget (sums to 1.0)
+        """
+        n = len(strategy_returns)
+        if n == 0:
+            return {}
+        if n == 1:
+            return {name: 1.0 for name in strategy_returns}
+
+        # Compute annualized vol for each strategy
+        vols = {}
+        for name, ret in strategy_returns.items():
+            aligned = ret.reindex(index).fillna(0.0)
+            ann_vol = aligned.std() * np.sqrt(252)
+            vols[name] = max(ann_vol, 1e-8)
+
+        # Allocate proportionally to vol (active strategies get more)
+        total_vol = sum(vols.values())
+        budgets = {name: vol / total_vol for name, vol in vols.items()}
+
+        # Apply floor and renormalize
+        for name in budgets:
+            budgets[name] = max(budgets[name], floor)
+        total = sum(budgets.values())
+        budgets = {name: b / total for name, b in budgets.items()}
+
+        return budgets
+
     def _apply_portfolio_vol_target(
         self,
         weights: pd.DataFrame,
         index: pd.DatetimeIndex,
+        strategy_returns: dict[str, pd.Series] | None = None,
+        risk_budgets: dict[str, float] | None = None,
     ) -> pd.DataFrame:
         """Scale combined weights to hit portfolio vol target.
 
-        Simple approach: scale by ratio of target to realized portfolio vol.
+        Uses realized portfolio vol from budget-weighted combined strategy returns,
+        matching the actual allocation.
         """
-        # Estimate portfolio vol from weights (simple: sum of absolute weights * avg vol)
-        # This is an approximation; correlation-aware version is in risk_overlay
-        gross = weights.abs().sum(axis=1)
-        scale = self.portfolio_vol_target / gross.clip(lower=0.01)
-        scale = scale.clip(upper=self.max_leverage)
+        if strategy_returns:
+            n_strategies = len(strategy_returns)
+            # Estimate realized portfolio vol using actual risk budgets
+            combined_ret = pd.Series(0.0, index=index)
+            for strat_name, strat_ret in strategy_returns.items():
+                if risk_budgets:
+                    budget = risk_budgets.get(strat_name, 1.0 / n_strategies)
+                else:
+                    budget = 1.0 / n_strategies
+                aligned = strat_ret.reindex(index).fillna(0.0)
+                combined_ret = combined_ret + aligned * budget
+            port_vol = ewma_volatility(combined_ret, com=self.vol_lookback)
+            port_vol_safe = port_vol.clip(lower=0.01)
+            scale = (self.portfolio_vol_target / port_vol_safe).clip(
+                upper=self.max_leverage
+            )
+            return weights.multiply(scale, axis=0)
 
-        return weights  # weights are already vol-scaled per strategy
+        return weights
 
 
 class ERCAllocator:

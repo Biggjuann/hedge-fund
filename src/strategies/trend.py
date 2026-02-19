@@ -39,12 +39,14 @@ class TrendStrategy(BaseStrategy):
         target_vol: float = 0.10,
         vol_lookback: int = 60,
         rebalance_freq: str = "monthly",
+        symbol: str = "ES",
     ):
         super().__init__(
             name="S1_trend",
             target_vol=target_vol,
             vol_lookback=vol_lookback,
             rebalance_freq=rebalance_freq,
+            symbol=symbol,
         )
         self.lookbacks = lookbacks or self.DEFAULT_LOOKBACKS
 
@@ -79,13 +81,18 @@ class TrendStrategy(BaseStrategy):
 
         close = prices["close"]
 
-        # Compute signal per horizon
+        # Compute signal per horizon — continuous vol-normalized (TSMOM literature)
         # CAUSALITY: use shift(1) so signal at t uses data up to t-1
         horizon_signals = {}
         for lb in lookbacks:
             # Return over lookback period, shifted by 1 for causality
             lookback_return = close.shift(1) / close.shift(1 + lb) - 1
-            sig = np.sign(lookback_return)
+            # Vol-normalize: use rolling vol over the lookback horizon for scaling
+            # This gives a continuous signal proportional to return magnitude
+            vol_h = close.pct_change().rolling(lb, min_periods=max(lb // 2, 10)).std() * np.sqrt(lb)
+            vol_h = vol_h.shift(1)  # causality
+            vol_h_safe = vol_h.clip(lower=0.01)
+            sig = (lookback_return / vol_h_safe).clip(-1.0, 1.0)
             horizon_signals[f"trend_{lb}"] = sig
 
         signals_df = pd.DataFrame(horizon_signals, index=prices.index)
@@ -100,8 +107,8 @@ class TrendStrategy(BaseStrategy):
         raw_weights = self.vol_scale_weights(ensemble_signal, returns, target_vol)
 
         # Build output DataFrame
-        signal_out = pd.DataFrame({"ES": ensemble_signal}, index=prices.index)
-        weight_out = pd.DataFrame({"ES": raw_weights}, index=prices.index)
+        signal_out = pd.DataFrame({self.symbol: ensemble_signal}, index=prices.index)
+        weight_out = pd.DataFrame({self.symbol: raw_weights}, index=prices.index)
 
         return StrategySignal(
             signals=signal_out,

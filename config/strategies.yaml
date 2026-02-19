@@ -7,8 +7,8 @@ strategies:
     lookback_periods: [21, 63, 252]  # trading days
     vol_lookback: 60                  # EWMA center-of-mass in days
     signal_clamp: [-1.0, 1.0]
-    target_vol_per_instrument: 0.10   # 10% annualized per instrument
-    rebalance_frequency: monthly
+    target_vol_per_instrument: 0.15   # 15% annualized per instrument
+    rebalance_frequency: daily        # daily for fastest response to regime changes
     bar_aggregation: 1D               # daily bars for signal computation
 
   S2_carry:
@@ -17,8 +17,8 @@ strategies:
     rank_long_quantile: 0.33          # top third
     rank_short_quantile: 0.33         # bottom third
     vol_lookback: 60
-    target_vol_per_instrument: 0.10
-    rebalance_frequency: monthly
+    target_vol_per_instrument: 0.15   # 15% annualized per instrument
+    rebalance_frequency: weekly       # weekly for more responsive carry
     bar_aggregation: 1D
 
   S3_vol_breakout:
