@@ -1,0 +1,42 @@
+# Risk / portfolio / execution parameters — per 06_RISK_PORTFOLIO_EXECUTION.md
+
+portfolio:
+  allocation_method: risk_parity       # equal vol contribution across strategies
+  portfolio_vol_target: 0.12           # 12% annualized
+  max_leverage: 4.0                    # gross leverage cap
+  correlation_lookback: 63             # days for correlation estimation
+
+  correlation_haircuts:
+    avg_corr_threshold_high: 0.6       # when avg pairwise corr exceeds this
+    risk_scale_at_high_corr: 0.60      # scale risk budget to 60%
+    avg_corr_threshold_extreme: 0.8
+    risk_scale_at_extreme_corr: 0.30
+
+drawdown_ladder:
+  - threshold: 0.05                    # DD >= 5%
+    risk_multiplier: 0.75
+  - threshold: 0.08                    # DD >= 8%
+    risk_multiplier: 0.50
+  - threshold: 0.10                    # DD >= 10%: flat + cooldown
+    risk_multiplier: 0.00
+  cooldown_days: 10
+  recovery_window: 20                  # days of stable performance to re-enter
+  recovery_min_sharpe: 0.0             # rolling Sharpe must be >= 0
+
+margin:
+  max_utilization: 0.35                # max 35% of equity as margin
+  stress_margin_multiplier: 1.5        # stress test: margins spike 50%
+  leverage_cap_under_stress: 2.0
+
+execution:
+  cost_model:
+    spread_method: fixed_ticks         # use avg_spread_ticks from instrument config
+    slippage_method: linear            # linear in size/ADV ratio
+    slippage_base_bps: 1.0             # baseline slippage in bps
+    slippage_size_coefficient: 5.0     # additional bps per 1% of ADV
+    impact_power: 0.5                  # square root impact model exponent
+
+  participation:
+    max_adv_pct: 0.01                  # max 1% of ADV per order
+    high_vol_adv_pct: 0.005            # reduced to 0.5% in high vol
+    vol_regime_threshold: 0.75         # percentile for "high vol" regime

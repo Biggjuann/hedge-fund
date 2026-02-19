@@ -1,0 +1,45 @@
+# Validation protocol — per 05_VALIDATION_PROTOCOL.md
+# No exceptions.
+
+walk_forward:
+  train_days: 756                      # ~3 years
+  test_days: 126                       # ~6 months
+  step_days: 63                        # ~3 months (rolling step)
+  min_train_days: 504                  # ~2 years minimum
+  purge_days: 5                        # gap between train and test
+  embargo_days: 5                      # buffer after test fold for ML
+
+parameter_selection:
+  top_k: 10                            # evaluate top-k parameter sets
+  selection_method: cluster_median     # pick cluster center / median
+  turnover_penalty: 0.1                # penalize high-turnover params
+  complexity_penalty: 0.05             # penalize complex params
+
+stress_tests:
+  slippage_multipliers: [1.0, 2.0, 3.0]
+  adverse_tick: true                   # 1 tick adverse on all fills
+  delayed_fills: true                  # next bar fill simulation
+  random_trade_drop_rate: 0.10         # 10% of signals randomly dropped
+  correlation_spike_scenario: true
+  margin_shock_scenario: true
+
+regime_conditioning:
+  vol_regime:
+    method: quantile
+    quantiles: [0.33, 0.67]            # low/med/high
+    lookback: 63
+
+  corr_regime:
+    method: quantile
+    quantiles: [0.50]                  # low/high
+    lookback: 63
+
+  trend_regime:
+    method: adx_proxy
+    adx_period: 14
+    threshold: 25                      # ADX > 25 = trending
+
+multiple_testing:
+  track_trials: true
+  min_trials_for_dsr: 5
+  confidence_level: 0.95

@@ -1,0 +1,21 @@
+# Data files (too large for git)
+ES_full_1min_continuous_UNadjusted_13wjmr/
+*.dat
+*.parquet
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+output/
+*.log
+.env
+.venv/
+venv/

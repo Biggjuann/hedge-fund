@@ -1,0 +1,44 @@
+# Strategy parameters — per 04_STRATEGY_LIBRARY.md
+# Conservative defaults; walk-forward will select from stable regions
+
+strategies:
+  S1_trend:
+    enabled: true
+    lookback_periods: [21, 63, 252]  # trading days
+    vol_lookback: 60                  # EWMA center-of-mass in days
+    signal_clamp: [-1.0, 1.0]
+    target_vol_per_instrument: 0.10   # 10% annualized per instrument
+    rebalance_frequency: monthly
+    bar_aggregation: 1D               # daily bars for signal computation
+
+  S2_carry:
+    enabled: true
+    carry_lookback: 63                # days for carry estimation
+    rank_long_quantile: 0.33          # top third
+    rank_short_quantile: 0.33         # bottom third
+    vol_lookback: 60
+    target_vol_per_instrument: 0.10
+    rebalance_frequency: monthly
+    bar_aggregation: 1D
+
+  S3_vol_breakout:
+    enabled: true
+    range_lookback: 20                # days for range compression detection
+    atr_lookback: 14
+    breakout_threshold_pct: 1.5       # multiplier of ATR for breakout
+    atr_percentile_threshold: 80      # percentile for vol regime break
+    vol_lookback: 60
+    target_vol_per_instrument: 0.05   # small baseline risk
+    max_loss_per_trade_pct: 0.02      # 2% max loss per trade
+    rebalance_frequency: daily
+    bar_aggregation: 1D
+
+  S4_spread_mr:
+    enabled: false  # phase 2
+    approved_spreads: []
+    zscore_lookback: 60
+    entry_z: 2.0
+    exit_z: 0.5
+    stop_atr_multiple: 3.0
+    structural_break_window: 252
+    min_liquidity_ratio: 0.1
