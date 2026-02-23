@@ -2,8 +2,8 @@
 
 portfolio:
   allocation_method: risk_parity       # equal vol contribution across strategies
-  portfolio_vol_target: 0.22           # 22% annualized — S&P-beating with margin
-  max_leverage: 6.0                    # gross leverage cap
+  portfolio_vol_target: 0.28           # 28% annualized — higher return target for S&P-beating
+  max_leverage: 8.0                    # gross leverage safety cap
   correlation_lookback: 63             # days for correlation estimation
 
   correlation_haircuts:
@@ -13,24 +13,39 @@ portfolio:
     risk_scale_at_extreme_corr: 0.30
 
 drawdown_ladder:
+  enabled: false                       # V4: disabled — net destructive on single-instrument ES
   thresholds:
-    - threshold: 0.05                  # DD >= 5%: reduce to 75%
-      risk_multiplier: 0.75
-    - threshold: 0.08                  # DD >= 8%: reduce to 50%
+    - threshold: 0.20                  # DD >= 20%: reduce to 80% (crisis territory)
+      risk_multiplier: 0.80
+    - threshold: 0.30                  # DD >= 30%: reduce to 50%
       risk_multiplier: 0.50
-    - threshold: 0.10                  # DD >= 10%: reduce to 25%
+    - threshold: 0.40                  # DD >= 40%: reduce to 25%
       risk_multiplier: 0.25
-    - threshold: 0.12                  # DD >= 12%: flat + cooldown
+    - threshold: 0.50                  # DD >= 50%: flat + cooldown (capital preservation)
       risk_multiplier: 0.00
   cooldown_days: 10
   recovery_window: 20                  # days of stable performance to re-enter
   recovery_min_sharpe: -0.5            # relaxed: allow re-entry during recovery
   max_cooldown_days: 30                # hard cap — force re-entry after 30 days
 
+bear_filter:
+  enabled: false                       # disabled: trend signal already flips short in bears
+  threshold: 0.30
+  min_scale: 0.40
+  momentum_horizons: [5, 10, 21, 42, 63, 126, 252]
+  vol_acceleration_window: 21
+
 regime_scaling:
+  enabled: false                       # disabled: trend signal handles regime adaptation
+  scaling_factor: 0.35
+  min_scale: 0.50
+
+vol_management:
   enabled: false
-  scaling_factor: 0.3                  # how aggressively to scale down in high-risk regimes
-  min_scale: 0.7                       # minimum scale factor (never reduce below 70%)
+  vol_target: 0.22
+  estimator: expanding_ewma
+  vol_floor_pct: 0.50
+  vol_cap_multiplier: 1.4
 
 margin:
   max_utilization: 0.35                # max 35% of equity as margin

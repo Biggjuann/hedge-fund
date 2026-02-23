@@ -131,7 +131,7 @@ def compute_transaction_costs(
     weight_changes: pd.DataFrame,
     prices: pd.DataFrame,
     metadata: dict[str, ContractMetadata],
-    equity: float,
+    equity: float | pd.Series,
     cost_model: CostModel,
     vol_regime: pd.Series | None = None,
 ) -> pd.DataFrame:
@@ -145,8 +145,8 @@ def compute_transaction_costs(
         Close prices per instrument.
     metadata : dict
         Contract metadata.
-    equity : float
-        Account equity for sizing.
+    equity : float or pd.Series
+        Account equity for sizing. If Series, uses time-varying equity.
     cost_model : CostModel
         Cost model instance.
     vol_regime : pd.Series, optional
@@ -158,12 +158,15 @@ def compute_transaction_costs(
         Cost breakdown per instrument per timestamp.
     """
     costs = pd.DataFrame(0.0, index=weight_changes.index, columns=weight_changes.columns)
+    equity_is_series = isinstance(equity, pd.Series)
 
     for i in range(len(weight_changes)):
         ts = weight_changes.index[i]
         is_high_vol = False
         if vol_regime is not None and ts in vol_regime.index:
             is_high_vol = vol_regime.loc[ts] == "high"
+
+        eq_i = float(equity.iloc[i]) if equity_is_series else float(equity)
 
         for inst in weight_changes.columns:
             dw = weight_changes.iloc[i][inst]
@@ -174,9 +177,9 @@ def compute_transaction_costs(
                 continue
 
             meta = metadata[inst]
-            price = prices.iloc[i][inst] if inst in prices.columns else prices.iloc[i]
+            price = prices.iloc[i][inst] if inst in prices.columns else float(prices.iloc[i].iloc[0])
 
-            trade_value = abs(dw) * equity
+            trade_value = abs(dw) * eq_i
             n_contracts = trade_value / (price * meta.multiplier) if price > 0 else 0
 
             breakdown = cost_model.compute_trade_cost(
@@ -188,6 +191,6 @@ def compute_transaction_costs(
             )
 
             # Store as fraction of equity
-            costs.iloc[i, costs.columns.get_loc(inst)] = breakdown.total / equity if equity > 0 else 0
+            costs.iloc[i, costs.columns.get_loc(inst)] = breakdown.total / eq_i if eq_i > 0 else 0
 
     return costs

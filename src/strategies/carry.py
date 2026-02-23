@@ -121,8 +121,9 @@ class CarryStrategy(BaseStrategy):
         # Normalize carry to [-1, +1] using rolling z-score
         # CAUSALITY: carry already uses shift(1)
         roll_window = min(504, max(carry_lb * 4, 252))
-        carry_mean = carry.rolling(roll_window, min_periods=60).mean()
-        carry_std = carry.rolling(roll_window, min_periods=60).std().clip(lower=0.001)
+        # Shift rolling stats by 1 so normalization uses only past data
+        carry_mean = carry.rolling(roll_window, min_periods=60).mean().shift(1)
+        carry_std = carry.rolling(roll_window, min_periods=60).std().shift(1).clip(lower=0.001)
         carry_zscore = (carry - carry_mean) / carry_std
         # Scale z-score to [-1, +1]: divide by 2 so ±2σ maps to ±1
         signal = (carry_zscore / 2.0).clip(-1.0, 1.0)

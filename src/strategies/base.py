@@ -153,13 +153,9 @@ class BaseStrategy(ABC):
 
         if f == "monthly":
             # Rebalance on first trading day of each month
-            rebal_mask = signals.index.to_series().dt.is_month_start
-            # Handle case where month starts on weekend
-            if not rebal_mask.any():
-                rebal_mask = (
-                    signals.index.to_series().dt.month
-                    != signals.index.to_series().dt.month.shift(1)
-                )
+            # Use month-change detection (works regardless of weekends)
+            months = signals.index.to_series().dt.month
+            rebal_mask = months != months.shift(1)
         elif f == "weekly":
             rebal_mask = signals.index.to_series().dt.dayofweek == 0  # Monday
         else:

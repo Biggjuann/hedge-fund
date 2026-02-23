@@ -63,6 +63,7 @@ class WalkForwardOptimizer:
         self.embargo_days = embargo_days
         self.min_train_days = min_train_days
         self._total_trials = 0
+        self._unique_param_sets: set[str] = set()
 
     def generate_folds(
         self,
@@ -171,6 +172,7 @@ class WalkForwardOptimizer:
 
             for params in param_grid:
                 self._total_trials += 1
+                self._unique_param_sets.add(str(sorted(params.items())))
 
                 strat_returns = strategy_fn(train_data, train_returns, params)
                 metric = metric_fn(strat_returns)
@@ -268,8 +270,12 @@ class WalkForwardOptimizer:
 
     @property
     def total_trials(self) -> int:
-        """Total parameter combinations tested (for multiple testing)."""
-        return self._total_trials
+        """Number of unique parameter sets tested (for multiple testing).
+
+        DSR penalizes independent strategy variations, not repeated
+        cross-validation of the same params on different time windows.
+        """
+        return max(len(self._unique_param_sets), 1)
 
     def validate_fold_integrity(self, folds: list[WFOFold]) -> list[str]:
         """Validate that folds don't overlap and maintain purge gaps.

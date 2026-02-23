@@ -53,17 +53,37 @@ def load_bars_from_csv(
 
     has_header = not first_line[0].isdigit()
 
+    # Detect separator (tab vs comma)
+    sep = "\t" if "\t" in first_line else ","
+
+    # Detect datetime column name for header files (preserve original case)
+    dt_col = "datetime"
+    if has_header:
+        header_cols_raw = [c.strip() for c in first_line.split(sep)]
+        header_cols_lower = [c.lower() for c in header_cols_raw]
+        if "time" in header_cols_lower:
+            dt_col = header_cols_raw[header_cols_lower.index("time")]
+        elif "datetime" in header_cols_lower:
+            dt_col = header_cols_raw[header_cols_lower.index("datetime")]
+
     df = pd.read_csv(
         file_path,
+        sep=sep,
         names=None if has_header else columns,
         header=0 if has_header else None,
-        parse_dates=["datetime"] if parse_dates else False,
-        index_col="datetime" if parse_dates else None,
+        parse_dates=[dt_col] if parse_dates else False,
+        index_col=dt_col if parse_dates else None,
     )
 
-    if not parse_dates and "datetime" in df.columns:
-        df["datetime"] = pd.to_datetime(df["datetime"])
-        df = df.set_index("datetime")
+    if not parse_dates:
+        for col_name in ["datetime", "time", "Time"]:
+            if col_name in df.columns:
+                df[col_name] = pd.to_datetime(df[col_name])
+                df = df.set_index(col_name)
+                break
+
+    # Normalize column names to lowercase
+    df.columns = [c.lower() for c in df.columns]
 
     # Ensure correct column names
     expected = ["open", "high", "low", "close", "volume"]

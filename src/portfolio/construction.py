@@ -107,12 +107,13 @@ class RiskParityAllocator:
         self,
         strategy_returns: dict[str, pd.Series],
         index: pd.DatetimeIndex,
-        floor: float = 0.10,
+        floor: float = 0.05,
     ) -> dict[str, float]:
-        """Compute risk budgets proportional to realized vol.
+        """Compute risk budgets for strategy combination.
 
-        Active strategies (higher vol) get more budget. Inactive strategies
-        (near-zero vol) get a floor allocation to avoid zero weight.
+        Uses equal weight (1/n) since strategies already vol-target their
+        own positions internally. The portfolio vol target scaling in
+        _apply_portfolio_vol_target handles overall risk sizing.
 
         Parameters
         ----------
@@ -121,7 +122,7 @@ class RiskParityAllocator:
         index : pd.DatetimeIndex
             Common index for alignment.
         floor : float
-            Minimum budget per strategy (default 2%).
+            Minimum budget per strategy.
 
         Returns
         -------
@@ -130,25 +131,9 @@ class RiskParityAllocator:
         n = len(strategy_returns)
         if n == 0:
             return {}
-        if n == 1:
-            return {name: 1.0 for name in strategy_returns}
 
-        # Compute annualized vol for each strategy
-        vols = {}
-        for name, ret in strategy_returns.items():
-            aligned = ret.reindex(index).fillna(0.0)
-            ann_vol = aligned.std() * np.sqrt(252)
-            vols[name] = max(ann_vol, 1e-8)
-
-        # Allocate proportionally to vol (active strategies get more)
-        total_vol = sum(vols.values())
-        budgets = {name: vol / total_vol for name, vol in vols.items()}
-
-        # Apply floor and renormalize
-        for name in budgets:
-            budgets[name] = max(budgets[name], floor)
-        total = sum(budgets.values())
-        budgets = {name: b / total for name, b in budgets.items()}
+        # Equal weight: each strategy manages its own vol targeting
+        budgets = {name: 1.0 / n for name in strategy_returns}
 
         return budgets
 
@@ -183,6 +168,61 @@ class RiskParityAllocator:
             return weights.multiply(scale, axis=0)
 
         return weights
+
+
+def apply_vol_management(
+    weights: pd.DataFrame,
+    returns: pd.Series,
+    vol_target: float = 0.22,
+    vol_floor_pct: float = 0.50,
+    vol_cap_multiplier: float = 2.0,
+    ewma_com: int = 60,
+) -> pd.DataFrame:
+    """Scale entire portfolio to target a specific realized volatility.
+
+    Uses expanding EWMA blend (70% EWMA + 30% expanding) for robustness.
+    vol_scale = (vol_target / realized_vol).clip(upper=vol_cap_multiplier)
+    with vol floored at vol_floor_pct * vol_target.
+
+    Parameters
+    ----------
+    weights : pd.DataFrame
+        Portfolio weights (instruments as columns).
+    returns : pd.Series
+        Portfolio returns for vol estimation.
+    vol_target : float
+        Annualized vol target.
+    vol_floor_pct : float
+        Floor realized vol at this fraction of vol_target.
+    vol_cap_multiplier : float
+        Max upward scaling (caps leverage increase).
+    ewma_com : int
+        EWMA center-of-mass for vol estimation.
+
+    Returns
+    -------
+    pd.DataFrame
+        Scaled portfolio weights.
+    """
+    # EWMA vol (annualized)
+    ewma_vol = ewma_volatility(returns, com=ewma_com)
+    # Expanding vol (annualized), shifted for causality (match EWMA shift)
+    expanding_vol = returns.expanding(min_periods=60).std() * np.sqrt(252)
+    expanding_vol = expanding_vol.shift(1)
+
+    # Blend: 70% EWMA + 30% expanding for robustness
+    blended_vol = 0.70 * ewma_vol + 0.30 * expanding_vol.reindex(ewma_vol.index).fillna(ewma_vol)
+
+    # Floor vol at fraction of target
+    vol_floor = vol_target * vol_floor_pct
+    safe_vol = blended_vol.clip(lower=vol_floor)
+
+    # Scale factor
+    vol_scale = (vol_target / safe_vol).clip(upper=vol_cap_multiplier)
+
+    # Align and apply
+    vol_scale = vol_scale.reindex(weights.index).fillna(1.0)
+    return weights.multiply(vol_scale, axis=0)
 
 
 class ERCAllocator:

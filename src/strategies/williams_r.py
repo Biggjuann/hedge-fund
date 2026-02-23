@@ -1,13 +1,19 @@
 """
-S1: Multi-horizon Trend / TSMOM Ensemble — per 04_STRATEGY_LIBRARY.md.
+S4: Williams %R Momentum Strategy.
 
-Signal per horizon: s_h = sign(return over lookback)
-Combine: s = average(s_h) then clamp to [-1, +1]
-Sizing: w_i = s_i * (target_vol / vol_i)
+Williams %R = (Highest High - Close) / (Highest High - Lowest Low) * -100
+Range: [-100, 0] where -100 = near lows, 0 = near highs.
+
+Signal logic (momentum — long when near highs, short when near lows):
+- %R near 0 (close near highest high): long (+1)
+- %R near -100 (close near lowest low): short (-1)
+- Linear interpolation between
+
+Multi-horizon ensemble with long lookbacks (126, 189, 252) for capturing
+sustained trends. Complementary to S1 trend (which uses return sign).
 
 CAUSALITY:
-- Lookback return at time t uses close[t-1] - close[t-1-lookback]
-- Vol uses EWMA(t-1)
+- All indicator inputs use shift(1) — signal at t uses data up to t-1
 """
 
 from __future__ import annotations
@@ -20,37 +26,27 @@ import pandas as pd
 from src.strategies.base import BaseStrategy, StrategySignal
 
 
-class TrendStrategy(BaseStrategy):
-    """Multi-horizon trend-following (TSMOM ensemble).
+class WilliamsRStrategy(BaseStrategy):
+    """Williams %R momentum strategy with multi-horizon ensemble."""
 
-    Per spec:
-    - lookbacks: [21, 63, 252] trading days
-    - signal = sign(lookback return) per horizon
-    - ensemble = average of horizon signals, clamped [-1, +1]
-    - vol-scaled position sizing
-    - monthly rebalance baseline
-    """
-
-    DEFAULT_LOOKBACKS = [21, 63, 252]
+    DEFAULT_LOOKBACKS = [126, 189, 252]
 
     def __init__(
         self,
         lookbacks: list[int] | None = None,
         target_vol: float = 0.10,
         vol_lookback: int = 60,
-        rebalance_freq: str = "monthly",
+        rebalance_freq: str = "weekly",
         symbol: str = "ES",
-        aggregation_method: str = "mean",
     ):
         super().__init__(
-            name="S1_trend",
+            name="S4_williams_r",
             target_vol=target_vol,
             vol_lookback=vol_lookback,
             rebalance_freq=rebalance_freq,
             symbol=symbol,
         )
         self.lookbacks = lookbacks or self.DEFAULT_LOOKBACKS
-        self.aggregation_method = aggregation_method
 
     def generate_signals(
         self,
@@ -58,14 +54,12 @@ class TrendStrategy(BaseStrategy):
         returns: pd.Series,
         params: dict[str, Any] | None = None,
     ) -> StrategySignal:
-        """Generate multi-horizon trend signals.
+        """Generate Williams %R momentum signals.
 
-        Per spec (04_STRATEGY_LIBRARY.md):
-          s_h = sign(return over lookback)
-          s = average(s_h) then clamp to [-1, +1]
-          w_i = s_i * (target_vol / vol_i)
+        Momentum mode: long when close is near period highs, short when near lows.
+        Uses long lookback periods (126-252d) for sustained trend capture.
 
-        CAUSALITY: lookback return at t uses close[t-1] / close[t-1-h].
+        CAUSALITY: shift(1) on all inputs — signal at t uses data up to t-1.
 
         Parameters
         ----------
@@ -88,28 +82,45 @@ class TrendStrategy(BaseStrategy):
         if params:
             self._n_params_tested += 1
 
+        high = prices["high"]
+        low = prices["low"]
         close = prices["close"]
 
-        # Per spec: s_h = sign(return over lookback)
-        # CAUSALITY: use shift(1) so signal at t uses data up to t-1
         horizon_signals = {}
         for lb in lookbacks:
-            lookback_return = close.shift(1) / close.shift(1 + lb) - 1
-            sig = np.sign(lookback_return)
-            horizon_signals[f"trend_{lb}"] = sig
+            # CAUSALITY: shift(1) — use data up to t-1
+            highest_high = high.shift(1).rolling(lb, min_periods=lb).max()
+            lowest_low = low.shift(1).rolling(lb, min_periods=lb).min()
+            close_prev = close.shift(1)
+
+            # Williams %R: range [-100, 0]
+            hl_range = highest_high - lowest_low
+            wr = np.where(
+                hl_range > 0,
+                (highest_high - close_prev) / hl_range * -100.0,
+                -50.0,
+            )
+            wr = pd.Series(wr, index=prices.index)
+
+            # Momentum signal: map %R to [-1, +1]
+            # %R = 0 (near highs) → +1 (long)
+            # %R = -100 (near lows) → -1 (short)
+            sig = (wr + 50.0) / 50.0  # maps 0→+1, -100→-1
+            sig = sig.clip(-1.0, 1.0)
+
+            horizon_signals[f"wr_{lb}"] = sig
 
         signals_df = pd.DataFrame(horizon_signals, index=prices.index)
 
-        # Per spec: s = average(s_h) then clamp to [-1, +1]
+        # Ensemble: average across horizons, clamp [-1, +1]
         ensemble_signal = signals_df.mean(axis=1).clip(-1.0, 1.0)
 
         # Apply rebalance frequency
         ensemble_signal = self.apply_rebalance_mask(ensemble_signal)
 
-        # Vol-scale the weights: w_i = s_i * (target_vol / vol_i)
+        # Vol-scale weights
         raw_weights = self.vol_scale_weights(ensemble_signal, returns, target_vol)
 
-        # Build output DataFrame
         signal_out = pd.DataFrame({self.symbol: ensemble_signal}, index=prices.index)
         weight_out = pd.DataFrame({self.symbol: raw_weights}, index=prices.index)
 
@@ -120,6 +131,6 @@ class TrendStrategy(BaseStrategy):
                 "lookbacks": lookbacks,
                 "horizon_signals": signals_df,
                 "n_horizons": len(lookbacks),
-                "aggregation_method": "sign_mean",
+                "aggregation_method": "wr_momentum",
             },
         )

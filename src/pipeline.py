@@ -32,7 +32,8 @@ from src.strategies.base import BaseStrategy, StrategySignal
 from src.strategies.trend import TrendStrategy
 from src.strategies.carry import CarryStrategy
 from src.strategies.vol_breakout import VolBreakoutStrategy
-from src.portfolio.construction import RiskParityAllocator
+from src.strategies.williams_r import WilliamsRStrategy
+from src.portfolio.construction import RiskParityAllocator, apply_vol_management
 from src.portfolio.risk_overlay import (
     RiskOverlay,
     DrawdownLadder,
@@ -102,6 +103,7 @@ class Pipeline:
                 vol_lookback=sc["S1_trend"]["vol_lookback"],
                 rebalance_freq=sc["S1_trend"]["rebalance_frequency"],
                 symbol=symbol,
+                aggregation_method=sc["S1_trend"].get("aggregation_method", "mean"),
             )
 
         if sc["S2_carry"]["enabled"]:
@@ -130,6 +132,16 @@ class Pipeline:
                 symbol=symbol,
             )
 
+        if sc.get("S4_williams_r", {}).get("enabled", False):
+            s4c = sc["S4_williams_r"]
+            self.strategies["S4_williams_r"] = WilliamsRStrategy(
+                lookbacks=s4c["lookback_periods"],
+                target_vol=s4c["target_vol_per_instrument"],
+                vol_lookback=s4c["vol_lookback"],
+                rebalance_freq=s4c["rebalance_frequency"],
+                symbol=symbol,
+            )
+
     def _init_portfolio(self) -> None:
         """Initialize portfolio and risk components."""
         pc = self.risk_config["portfolio"]
@@ -141,6 +153,8 @@ class Pipeline:
             max_leverage=pc["max_leverage"],
             vol_lookback=pc["correlation_lookback"],
         )
+
+        self.dd_ladder_enabled = dc.get("enabled", True)
 
         thresholds = [
             {"threshold": t["threshold"], "risk_multiplier": t["risk_multiplier"]}
@@ -186,6 +200,19 @@ class Pipeline:
         self.regime_scaling_factor = rs.get("scaling_factor", 0.5)
         self.regime_min_scale = rs.get("min_scale", 0.5)
 
+        # Bear filter config
+        bf = self.risk_config.get("bear_filter", {})
+        self.bear_filter_enabled = bf.get("enabled", False)
+        self.bear_filter_threshold = bf.get("threshold", 0.20)
+        self.bear_filter_min_scale = bf.get("min_scale", 0.30)
+
+        # Vol management config
+        vm = self.risk_config.get("vol_management", {})
+        self.vol_management_enabled = vm.get("enabled", False)
+        self.vol_management_target = vm.get("vol_target", 0.22)
+        self.vol_management_floor_pct = vm.get("vol_floor_pct", 0.50)
+        self.vol_management_cap = vm.get("vol_cap_multiplier", 2.0)
+
         ec = self.risk_config["execution"]["cost_model"]
         self.cost_model = CostModel(
             slippage_base_bps=ec["slippage_base_bps"],
@@ -206,11 +233,16 @@ class Pipeline:
         )
 
         rc = self.validation_config["regime_conditioning"]
+        bear_rc = rc.get("bear_regime", {})
+        chop_rc = rc.get("chop_regime", {})
         self.regime_tagger = RegimeTagger(
             vol_lookback=rc["vol_regime"]["lookback"],
             corr_lookback=rc["corr_regime"]["lookback"],
             adx_period=rc["trend_regime"]["adx_period"],
             adx_threshold=rc["trend_regime"]["threshold"],
+            bear_momentum_horizons=bear_rc.get("momentum_horizons"),
+            bear_vol_acceleration_window=bear_rc.get("vol_acceleration_window", 21),
+            chop_momentum_threshold=chop_rc.get("momentum_threshold", 0.02),
         )
 
         self.regime_oos = RegimeConditionedOOS(
@@ -409,8 +441,28 @@ class Pipeline:
             strategy_weights, strategy_returns_for_alloc
         )
 
-        # Regime-adaptive position sizing: scale down in high-risk regimes
+        # Compute regime labels (always, for reporting and optional scaling)
         regime_labels = self.regime_tagger.tag_all(d["daily"], d["returns"])
+
+        # --- PRE-BACKTEST RISK CHAIN ---
+
+        # (a) Bear filter (proactive): scale down when bear probability is high
+        if self.bear_filter_enabled and regime_labels.bear_probability is not None:
+            bear_prob = regime_labels.bear_probability.reindex(
+                combined_weights.index
+            ).fillna(0.0)
+            # Scale linearly: 1.0 at threshold -> min_scale at bear_prob=1.0
+            bear_scale = np.where(
+                bear_prob > self.bear_filter_threshold,
+                1.0 - (bear_prob - self.bear_filter_threshold) / (1.0 - self.bear_filter_threshold) * (1.0 - self.bear_filter_min_scale),
+                1.0,
+            )
+            bear_scale = pd.Series(bear_scale, index=combined_weights.index).clip(
+                lower=self.bear_filter_min_scale
+            )
+            combined_weights = combined_weights.multiply(bear_scale, axis=0)
+
+        # (b) Regime-adaptive scaling (4-factor composite risk)
         if self.regime_scaling_enabled:
             composite = regime_labels.composite_risk.reindex(
                 combined_weights.index
@@ -420,6 +472,11 @@ class Pipeline:
             ).clip(lower=self.regime_min_scale)
             combined_weights = combined_weights.multiply(regime_scale, axis=0)
 
+        # (c) Vol management: DISABLED in V3 — redundant with portfolio vol
+        # target in RiskParityAllocator. Re-targeting vol after bear filter
+        # and regime scaling undoes their risk reduction.
+        # Kept in config for V1/V2 backward compat, but pipeline skips it.
+
         # 4. Backtest with costs
         print("\n[4/7] Running backtest...")
         engine = VectorizedBacktestEngine(
@@ -427,17 +484,11 @@ class Pipeline:
             initial_equity=1_000_000,
         )
 
-        result = engine.run(
-            weights=combined_weights,
-            returns=d["returns"],
-            metadata={first_symbol: d["metadata"]},
-            prices=d["daily"][["close"]].rename(columns={"close": first_symbol}),
-        )
+        prices_df = d["daily"][["close"]].rename(columns={"close": first_symbol})
+        meta_dict = {first_symbol: d["metadata"]}
 
-        # Apply risk overlays
+        # Apply equity-independent overlays first (corr haircut, leverage cap)
         print("  Applying risk overlays...")
-
-        # Compute average pairwise correlation of strategy returns
         avg_corr = None
         if len(strategy_returns_for_alloc) >= 2:
             strat_ret_df = pd.DataFrame(strategy_returns_for_alloc)
@@ -447,21 +498,91 @@ class Pipeline:
                 com=self.risk_config["portfolio"]["correlation_lookback"],
             )
 
-        adjusted_weights = self.risk_overlay.apply(
-            combined_weights,
-            result.equity_curve,
-            avg_corr=avg_corr,
-        )
+        # Correlation haircut (doesn't depend on equity curve)
+        pre_dd_weights = combined_weights.copy()
+        if avg_corr is not None:
+            corr_scale = self.corr_haircut.compute_haircut(avg_corr)
+            common_idx = pre_dd_weights.index.intersection(corr_scale.index)
+            for col in pre_dd_weights.columns:
+                pre_dd_weights.loc[common_idx, col] *= corr_scale.loc[common_idx]
 
-        # Re-run with adjusted weights
-        result_adjusted = engine.run(
-            weights=adjusted_weights,
+        # Weight smoothing: EMA to reduce unnecessary turnover from
+        # daily vol changes while keeping signal responsiveness
+        smoothing_halflife = 5  # days
+        pre_dd_weights = pre_dd_weights.ewm(halflife=smoothing_halflife).mean()
+
+        # Leverage cap (doesn't depend on equity curve)
+        gross = pre_dd_weights.abs().sum(axis=1)
+        max_lev = self.risk_config["portfolio"]["max_leverage"]
+        excess = gross > max_lev
+        if excess.any():
+            scale_down = max_lev / gross[excess]
+            pre_dd_weights.loc[excess] = pre_dd_weights.loc[excess].multiply(
+                scale_down, axis=0
+            )
+
+        # Raw backtest (no DD ladder) — for reporting raw Sharpe
+        result_raw = engine.run(
+            weights=pre_dd_weights,
             returns=d["returns"],
-            metadata={first_symbol: d["metadata"]},
-            prices=d["daily"][["close"]].rename(columns={"close": first_symbol}),
+            metadata=meta_dict,
+            prices=prices_df,
         )
 
-        print(f"  Sharpe (raw):      {result.metrics['sharpe_ratio']:.3f}")
+        # Online single-pass DD ladder (if enabled)
+        if self.dd_ladder_enabled:
+            result_adjusted = engine.run_with_dd_ladder(
+                weights=pre_dd_weights,
+                returns=d["returns"],
+                dd_ladder=self.drawdown_ladder,
+                metadata=meta_dict,
+                prices=prices_df,
+            )
+        else:
+            # DD ladder disabled — adjusted = raw
+            result_adjusted = result_raw
+
+        # Apply margin constraints using adjusted equity
+        print("  Applying margin constraints...")
+        adjusted_weights = self.margin_monitor.apply_margin_constraint(
+            result_adjusted.weights,
+            prices_df,
+            meta_dict,
+            result_adjusted.equity_curve,
+        )
+
+        # Re-run if margin constraint changed weights materially
+        if not adjusted_weights.equals(result_adjusted.weights):
+            if self.dd_ladder_enabled:
+                result_adjusted = engine.run_with_dd_ladder(
+                    weights=pre_dd_weights,
+                    returns=d["returns"],
+                    dd_ladder=self.drawdown_ladder,
+                    metadata=meta_dict,
+                    prices=prices_df,
+                )
+            else:
+                result_adjusted = engine.run(
+                    weights=pre_dd_weights,
+                    returns=d["returns"],
+                    metadata=meta_dict,
+                    prices=prices_df,
+                )
+
+        # Log margin diagnostics
+        margin_util = self._compute_margin_utilization(
+            result_adjusted.weights, prices_df, meta_dict, result_adjusted.equity_curve
+        )
+        n_breach = (margin_util > self.margin_monitor.max_utilization).sum()
+        print(f"  Margin utilization: peak={margin_util.max():.1%}, "
+              f"mean={margin_util.mean():.1%}, "
+              f"breach days={n_breach}")
+        stress_util = margin_util * self.margin_monitor.stress_margin_multiplier
+        n_stress_breach = (stress_util > self.margin_monitor.max_utilization).sum()
+        print(f"  Stress margin (1.5x): peak={stress_util.max():.1%}, "
+              f"breach days={n_stress_breach}")
+
+        print(f"  Sharpe (raw):      {result_raw.metrics['sharpe_ratio']:.3f}")
         print(f"  Sharpe (adjusted): {result_adjusted.metrics['sharpe_ratio']:.3f}")
         print(f"  Max DD (adjusted): {result_adjusted.metrics['max_drawdown']:.3%}")
 
@@ -484,7 +605,7 @@ class Pipeline:
         regime_reports.append(regime_report)
 
         if run_stress:
-            weight_changes = adjusted_weights.diff().fillna(0.0)
+            weight_changes = result_adjusted.weights.diff().fillna(0.0)
             cost_per_unit = 0.001  # 10bps baseline
             stress_results = self.stress_suite.run_all(
                 result_adjusted.returns,
@@ -495,12 +616,22 @@ class Pipeline:
 
         # 7. Generate reports
         print("\n[7/7] Generating reports...")
+        # Extract DD multipliers from online pass metadata
+        dd_mults_from_engine = result_adjusted.metadata.get("dd_multipliers")
+
         reports = self._generate_all_reports(
             result_adjusted,
             wfo_folds,
             regime_reports,
             stress_results,
             run_id,
+            signals=signals,
+            strategy_returns=strategy_returns_for_alloc,
+            strategy_weights=strategy_weights,
+            adjusted_weights=result_adjusted.weights,
+            margin_util=margin_util,
+            regime_labels=regime_labels,
+            dd_multipliers=dd_mults_from_engine,
         )
 
         # Leakage checks
@@ -518,12 +649,32 @@ class Pipeline:
 
         return {
             "result": result_adjusted,
+            "result_raw": result_raw,
             "wfo_folds": wfo_folds,
             "regime_reports": regime_reports,
             "stress_results": stress_results,
             "reports": reports,
             "data": data,
         }
+
+    def _compute_margin_utilization(
+        self,
+        weights: pd.DataFrame,
+        prices: pd.DataFrame,
+        metadata: dict[str, 'ContractMetadata'],
+        equity_curve: pd.Series,
+    ) -> pd.Series:
+        """Compute margin utilization as a time series (vectorized).
+
+        utilization = sum(|weight_i| * margin_init_pct_i) for each row.
+        This is equivalent to total_margin_required / equity.
+        """
+        utilization = pd.Series(0.0, index=weights.index)
+        for col in weights.columns:
+            if col in metadata:
+                margin_pct = metadata[col].margin_init_pct
+                utilization += weights[col].abs() * margin_pct
+        return utilization
 
     def _run_wfo(
         self,
@@ -565,6 +716,11 @@ class Pipeline:
                         strat_params["atr_lookback"] = params["atr_lookback"]
                     if "target_vol" in params:
                         strat_params["target_vol"] = params["target_vol"]
+                elif "S4_williams_r" in strat_name:
+                    if "wr_lookbacks" in params:
+                        strat_params["lookbacks"] = params["wr_lookbacks"]
+                    if "target_vol" in params:
+                        strat_params["target_vol"] = params["target_vol"]
 
                 sig = strategy.generate_signals(
                     data_slice, returns_slice, strat_params or None
@@ -578,16 +734,17 @@ class Pipeline:
             return pd.Series(0.0, index=data_slice.index)
 
         # Parameter grid — covers per-strategy params
+        # Expanded to include multi-speed TSM lookbacks
         param_grid = [
-            {"lookbacks": [21, 63, 252], "target_vol": 0.08,
+            {"lookbacks": [5, 10, 21, 42, 63, 126, 252], "target_vol": 0.08,
              "carry_lookback": 63, "range_lookback": 20, "atr_lookback": 14},
-            {"lookbacks": [21, 63, 252], "target_vol": 0.10,
+            {"lookbacks": [5, 10, 21, 42, 63, 126, 252], "target_vol": 0.10,
              "carry_lookback": 63, "range_lookback": 20, "atr_lookback": 14},
-            {"lookbacks": [21, 63, 252], "target_vol": 0.12,
+            {"lookbacks": [5, 10, 21, 42, 63, 126, 252], "target_vol": 0.12,
              "carry_lookback": 63, "range_lookback": 20, "atr_lookback": 14},
-            {"lookbacks": [21, 63, 126], "target_vol": 0.10,
+            {"lookbacks": [10, 21, 42, 63, 126], "target_vol": 0.10,
              "carry_lookback": 42, "range_lookback": 15, "atr_lookback": 10},
-            {"lookbacks": [42, 126, 252], "target_vol": 0.10,
+            {"lookbacks": [21, 63, 126, 252], "target_vol": 0.10,
              "carry_lookback": 126, "range_lookback": 30, "atr_lookback": 20},
         ]
 
@@ -615,21 +772,34 @@ class Pipeline:
         """Run leakage detection on all strategies."""
         results = []
 
+        # Per-strategy backward thresholds: momentum strategies have
+        # natural autocorrelation that isn't leakage
+        backward_thresholds = {
+            "S1_trend": 0.35,
+            "S3_vol_breakout": 0.35,
+            "S2_carry": 0.10,
+            "S4_williams_r": 0.35,
+        }
+
         for strat_name, sig in signals.items():
             signal_series = sig.signals.iloc[:, 0]
             returns = data_dict["returns"]
 
-            # Test signal timing
+            # Test signal timing with strategy-appropriate thresholds
+            bt = backward_thresholds.get(strat_name, 0.05)
             timing_result = self.leakage_detector.test_signal_timing(
-                signal_series, returns
+                signal_series, returns, backward_threshold=bt
             )
             timing_result.test_name = f"{strat_name}_{timing_result.test_name}"
             results.append(timing_result)
 
-        # Test WFO fold integrity
+        # Test WFO fold integrity (pass step/test days for rolling WFO awareness)
         if folds:
             fold_result = self.leakage_detector.test_wfo_fold_integrity(
-                folds, self.wfo.purge_days
+                folds,
+                self.wfo.purge_days,
+                step_days=self.wfo.step_days,
+                test_days=self.wfo.test_days,
             )
             results.append(fold_result)
 
@@ -646,6 +816,13 @@ class Pipeline:
         regime_reports: list,
         stress_results: list,
         run_id: str,
+        signals: dict | None = None,
+        strategy_returns: dict | None = None,
+        strategy_weights: dict | None = None,
+        adjusted_weights: pd.DataFrame | None = None,
+        margin_util: pd.Series | None = None,
+        regime_labels=None,
+        dd_multipliers: pd.Series | None = None,
     ) -> dict:
         """Generate all output reports."""
         reports = {}
@@ -687,5 +864,39 @@ class Pipeline:
             label="portfolio_adjusted",
             run_id=run_id,
         )
+
+        # Strategy data (per-strategy signals, weights, returns)
+        if signals and strategy_returns and strategy_weights:
+            self.report_gen.save_strategy_data(
+                signals, strategy_returns, strategy_weights, run_id
+            )
+
+        # Risk timeseries (DD multipliers, margin, composite risk, leverage)
+        if adjusted_weights is not None:
+            # Use provided DD multipliers from online pass if available,
+            # otherwise fall back to recomputing from equity curve
+            if dd_multipliers is not None:
+                dd_mult = dd_multipliers
+            else:
+                dd_mult = self.drawdown_ladder.compute_risk_multipliers(
+                    result.equity_curve
+                )
+            if margin_util is None:
+                margin_util = pd.Series(0.0, index=result.equity_curve.index)
+            leverage = adjusted_weights.abs().sum(axis=1)
+            # Composite risk: average of normalized DD depth and margin util
+            cumulative = result.equity_curve
+            peak = cumulative.cummax()
+            dd_depth = ((peak - cumulative) / peak).clip(lower=0)
+            composite_risk = (dd_depth + margin_util.reindex(dd_depth.index, fill_value=0)) / 2
+            if regime_labels is not None and hasattr(regime_labels, 'composite_risk'):
+                regime_risk = regime_labels.composite_risk.reindex(
+                    dd_depth.index
+                ).fillna(0)
+                composite_risk = (dd_depth + margin_util.reindex(dd_depth.index, fill_value=0) + regime_risk) / 3
+
+            self.report_gen.save_risk_timeseries(
+                dd_mult, margin_util, composite_risk, leverage, run_id
+            )
 
         return reports

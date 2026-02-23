@@ -1,39 +1,48 @@
 # Strategy parameters — per 04_STRATEGY_LIBRARY.md
-# Conservative defaults; walk-forward will select from stable regions
+# V3: Fixed to match research spec exactly
 
 strategies:
   S1_trend:
     enabled: true
-    lookback_periods: [21, 63, 252]  # trading days
-    vol_lookback: 60                  # EWMA center-of-mass in days
+    lookback_periods: [21, 63, 252]     # per spec: 1M, 3M, 12M horizons
+    aggregation_method: sign_mean        # per spec: sign(return), then average
+    vol_lookback: 60                     # EWMA center-of-mass in days
     signal_clamp: [-1.0, 1.0]
-    target_vol_per_instrument: 0.15   # 15% annualized per instrument
-    rebalance_frequency: daily        # daily for fastest response to regime changes
-    bar_aggregation: 1D               # daily bars for signal computation
+    target_vol_per_instrument: 0.15      # 15% annualized per instrument
+    rebalance_frequency: weekly           # weekly: reduces turnover ~5x, saves ~0.8% annual cost
+    bar_aggregation: 1D
 
   S2_carry:
     enabled: true
-    carry_lookback: 63                # days for carry estimation
-    rank_long_quantile: 0.33          # top third
-    rank_short_quantile: 0.33         # bottom third
+    carry_lookback: 63                   # days for carry/mean-reversion estimation
+    rank_long_quantile: 0.33
+    rank_short_quantile: 0.33
     vol_lookback: 60
-    target_vol_per_instrument: 0.15   # 15% annualized per instrument
-    rebalance_frequency: weekly       # weekly for more responsive carry
+    target_vol_per_instrument: 0.15      # 15% annualized per instrument
+    rebalance_frequency: weekly          # weekly for mean-reversion
     bar_aggregation: 1D
 
   S3_vol_breakout:
-    enabled: true
-    range_lookback: 20                # days for range compression detection
+    enabled: false                       # disabled: negative Sharpe on ES across all variants
+    range_lookback: 20
     atr_lookback: 14
-    breakout_threshold_pct: 1.5       # multiplier of ATR for breakout
-    atr_percentile_threshold: 80      # percentile for vol regime break
+    breakout_threshold_pct: 1.5
+    atr_percentile_threshold: 80
     vol_lookback: 60
-    target_vol_per_instrument: 0.05   # small baseline risk
-    max_loss_per_trade_pct: 0.02      # 2% max loss per trade
+    target_vol_per_instrument: 0.05
+    max_loss_per_trade_pct: 0.02
     rebalance_frequency: daily
     bar_aggregation: 1D
 
-  S4_spread_mr:
+  S4_williams_r:
+    enabled: false                       # 0.87 corr with S1, dilutes Sharpe — kept for reference
+    lookback_periods: [126, 189, 252]   # long-horizon %R momentum (6M, 9M, 12M)
+    vol_lookback: 60
+    target_vol_per_instrument: 0.15
+    rebalance_frequency: weekly
+    bar_aggregation: 1D
+
+  S5_spread_mr:
     enabled: false  # phase 2
     approved_spreads: []
     zscore_lookback: 60

@@ -103,13 +103,17 @@ class VectorizedBacktestEngine:
         gross = (w[common_cols] * r[common_cols]).sum(axis=1)
 
         # Compute costs from weight changes (turnover)
-        weight_changes = w.diff().fillna(0.0)
+        # Day 0: going from flat to initial position incurs cost
+        weight_changes = w.diff()
+        weight_changes.iloc[0] = w.iloc[0]  # first trade is full initial position
         if metadata is not None and prices is not None:
+            # Use gross equity curve for cost sizing (time-varying)
+            gross_equity = self.initial_equity * (1 + gross).cumprod()
             cost_df = compute_transaction_costs(
                 weight_changes,
                 prices.loc[common_idx] if isinstance(prices, pd.DataFrame) else prices,
                 metadata,
-                self.initial_equity,
+                gross_equity,
                 self.cost_model,
                 vol_regime,
             )
@@ -136,6 +140,115 @@ class VectorizedBacktestEngine:
             weights=w,
             equity_curve=equity,
             metrics=metrics,
+        )
+
+
+    def run_with_dd_ladder(
+        self,
+        weights: pd.DataFrame,
+        returns: pd.DataFrame | pd.Series,
+        dd_ladder,
+        metadata: dict[str, ContractMetadata] | None = None,
+        prices: pd.DataFrame | None = None,
+        vol_regime: pd.Series | None = None,
+    ) -> BacktestResult:
+        """Run backtest with online (single-pass) drawdown ladder.
+
+        Phase 1 (online): iterate day-by-day, compute DD from actual
+        equity, get DD multiplier, compute gross return, update equity/peak.
+
+        Phase 2 (vectorized): apply DD multipliers to weights, compute
+        costs via existing cost model, compute final net returns and metrics.
+
+        Parameters
+        ----------
+        weights : pd.DataFrame
+            Pre-DD-ladder portfolio weights.
+        returns : pd.DataFrame or pd.Series
+            Returns per instrument.
+        dd_ladder : DrawdownLadder
+            Drawdown ladder with step() and reset_state() methods.
+        metadata : dict, optional
+            Contract metadata for cost computation.
+        prices : pd.DataFrame, optional
+            Price data for cost computation.
+        vol_regime : pd.Series, optional
+            Vol regime for cost widening.
+
+        Returns
+        -------
+        BacktestResult
+            With DD multipliers stored in metadata['dd_multipliers'].
+        """
+        if isinstance(returns, pd.Series):
+            returns = returns.to_frame(name=weights.columns[0])
+
+        # Align indices
+        common_idx = weights.index.intersection(returns.index)
+        w = weights.loc[common_idx]
+        r = returns.loc[common_idx]
+        common_cols = w.columns.intersection(r.columns)
+
+        # Phase 1: online DD ladder — iterate day-by-day
+        dd_ladder.reset_state()
+        equity = self.initial_equity
+        dd_multipliers = np.ones(len(common_idx))
+
+        for i in range(len(common_idx)):
+            # Get multiplier based on current equity BEFORE today's return
+            mult = dd_ladder.step(equity)
+            dd_multipliers[i] = mult
+
+            # Compute today's gross return with DD-adjusted weights
+            day_gross = (w.iloc[i][common_cols] * r.iloc[i][common_cols]).sum() * mult
+            equity = equity * (1 + day_gross)
+
+        dd_mult_series = pd.Series(dd_multipliers, index=common_idx)
+
+        # Phase 2: apply DD multipliers to weights, compute costs vectorized
+        adjusted_w = w.copy()
+        for col in adjusted_w.columns:
+            adjusted_w[col] *= dd_mult_series
+
+        # Gross returns with DD-adjusted weights
+        gross = (adjusted_w[common_cols] * r[common_cols]).sum(axis=1)
+
+        # Compute costs from weight changes (turnover)
+        weight_changes = adjusted_w.diff()
+        weight_changes.iloc[0] = adjusted_w.iloc[0]
+        if metadata is not None and prices is not None:
+            gross_equity = self.initial_equity * (1 + gross).cumprod()
+            cost_df = compute_transaction_costs(
+                weight_changes,
+                prices.loc[common_idx] if isinstance(prices, pd.DataFrame) else prices,
+                metadata,
+                gross_equity,
+                self.cost_model,
+                vol_regime,
+            )
+            costs = cost_df.sum(axis=1)
+        else:
+            turnover = weight_changes.abs().sum(axis=1)
+            costs = turnover * 0.001
+
+        # Net returns
+        net = gross - costs
+
+        # Equity curve (recomputed from net returns for consistency)
+        equity_curve = self.initial_equity * (1 + net).cumprod()
+
+        # Metrics
+        metrics = self.perf.compute_all(net)
+
+        return BacktestResult(
+            strategy_name="vectorized_online_dd",
+            returns=net,
+            gross_returns=gross,
+            costs=costs,
+            weights=adjusted_w,
+            equity_curve=equity_curve,
+            metrics=metrics,
+            metadata={"dd_multipliers": dd_mult_series},
         )
 
 

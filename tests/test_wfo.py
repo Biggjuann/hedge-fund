@@ -172,13 +172,15 @@ class TestWFOValidation:
         assert len(issues) > 0, "Should detect overlap"
 
     def test_trial_counting(self):
-        """WFO should track total trials for multiple testing."""
+        """WFO should track unique param sets for multiple testing."""
         wfo = WalkForwardOptimizer()
-        assert wfo.total_trials == 0
+        assert wfo.total_trials == 1  # max(0, 1)
 
-        # Simulate a run by checking the counter mechanism
-        wfo._total_trials = 50
-        assert wfo.total_trials == 50
+        # Simulate adding unique param sets
+        wfo._unique_param_sets.add("param_set_1")
+        wfo._unique_param_sets.add("param_set_2")
+        wfo._unique_param_sets.add("param_set_1")  # duplicate
+        assert wfo.total_trials == 2  # only unique sets count
 
 
 class TestWFORun:

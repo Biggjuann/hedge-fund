@@ -1,7 +1,14 @@
 # Data files (too large for git)
 ES_full_1min_continuous_UNadjusted_13wjmr/
+data_norgate/
+data_external/
+Jungle Papers/
 *.dat
 *.parquet
+
+# Local settings
+.claude/
+.streamlit/
 
 __pycache__/
 *.py[cod]

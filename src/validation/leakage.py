@@ -123,6 +123,7 @@ class LeakageDetector:
         self,
         signal: pd.Series,
         returns: pd.Series,
+        backward_threshold: float = 0.05,
     ) -> LeakageTestResult:
         """Test that signals predict forward returns, not backward.
 
@@ -130,6 +131,17 @@ class LeakageDetector:
         - corr(signal_t, return_{t+1}) > 0 (or significant)
         - corr(signal_t, return_t) ≈ 0 (no same-bar leakage)
         - corr(signal_t, return_{t-1}) ≈ 0 (no backward prediction)
+
+        Parameters
+        ----------
+        signal : pd.Series
+            Signal series.
+        returns : pd.Series
+            Return series.
+        backward_threshold : float
+            Threshold for backward correlation. Momentum strategies
+            naturally exhibit autocorrelation, so this can be relaxed
+            beyond the strict 0.05 same-bar threshold.
         """
         common = signal.dropna().index.intersection(returns.dropna().index)
         sig = signal.loc[common]
@@ -145,12 +157,13 @@ class LeakageDetector:
         backward_1 = sig.corr(ret.shift(1))
         backward_2 = sig.corr(ret.shift(2))
 
-        # Leakage: same-bar or backward correlation is suspiciously high
-        threshold = 0.05
-        same_ok = abs(same_bar) < threshold if not np.isnan(same_bar) else True
+        # Leakage: same-bar threshold stays strict at 0.05
+        same_threshold = 0.05
+        same_ok = abs(same_bar) < same_threshold if not np.isnan(same_bar) else True
+        # Backward threshold is configurable (momentum autocorrelation)
         back_ok = (
-            abs(backward_1) < threshold if not np.isnan(backward_1) else True
-        ) and (abs(backward_2) < threshold if not np.isnan(backward_2) else True)
+            abs(backward_1) < backward_threshold if not np.isnan(backward_1) else True
+        ) and (abs(backward_2) < backward_threshold if not np.isnan(backward_2) else True)
 
         passed = same_ok and back_ok
 
@@ -172,6 +185,8 @@ class LeakageDetector:
         self,
         folds: list,
         purge_days: int = 5,
+        step_days: int | None = None,
+        test_days: int | None = None,
     ) -> LeakageTestResult:
         """Test that WFO folds don't overlap and maintain purge gaps.
 
@@ -181,12 +196,22 @@ class LeakageDetector:
             List of WFOFold objects.
         purge_days : int
             Required minimum purge gap in calendar days.
+        step_days : int, optional
+            WFO step size in days. If step_days < test_days, this is
+            a rolling WFO and test window overlap is expected (not leakage).
+        test_days : int, optional
+            WFO test window size in days.
 
         Returns
         -------
         LeakageTestResult
         """
         issues = []
+        is_rolling = (
+            step_days is not None
+            and test_days is not None
+            and step_days < test_days
+        )
 
         for i, fold in enumerate(folds):
             # Train must not overlap test
@@ -201,7 +226,8 @@ class LeakageDetector:
                 )
 
             # No test overlap between consecutive folds
-            if i < len(folds) - 1:
+            # (skip this check for rolling WFO where step < test is by design)
+            if not is_rolling and i < len(folds) - 1:
                 next_fold = folds[i + 1]
                 if fold.test_end > next_fold.test_start:
                     issues.append(
@@ -210,10 +236,14 @@ class LeakageDetector:
 
         passed = len(issues) == 0
 
+        info_notes = ""
+        if is_rolling:
+            info_notes = f" (rolling WFO: step={step_days}d < test={test_days}d, overlap expected)"
+
         return LeakageTestResult(
             test_name="wfo_fold_integrity",
             passed=passed,
-            details="; ".join(issues) if issues else "All folds valid",
+            details=("; ".join(issues) if issues else "All folds valid") + info_notes,
             severity="critical" if not passed else "info",
         )
 

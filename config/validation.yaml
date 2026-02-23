@@ -39,6 +39,15 @@ regime_conditioning:
     adx_period: 14
     threshold: 25                      # ADX > 25 = trending
 
+  bear_regime:
+    method: bear_probability
+    momentum_horizons: [5, 10, 21, 42, 63, 126, 252]
+    vol_acceleration_window: 21
+
+  chop_regime:
+    method: chop_detection
+    momentum_threshold: 0.05
+
 multiple_testing:
   track_trials: true
   min_trials_for_dsr: 5

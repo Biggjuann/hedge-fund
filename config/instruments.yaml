@@ -1,8 +1,11 @@
-# Contract metadata for v1 universe
+# Contract metadata — V11 expanded universe (33 instruments)
 # Per 07_DATA_MODEL.md: multiplier, tick_size, tick_value, currency, hours,
 # last_trade, first_notice, delivery_type, roll_schedule
 
 instruments:
+  # ===========================================================
+  # INDEX (7)
+  # ===========================================================
   ES:
     description: "E-mini S&P 500"
     exchange: CME
@@ -13,35 +16,12 @@ instruments:
     tick_size: 0.25
     tick_value: 12.50
     price_precision: 2
-    session_hours: "18:00-17:00"  # ET, nearly 23h
+    session_hours: "18:00-17:00"
     margin_init_pct: 0.05
     margin_maint_pct: 0.04
     commission_per_contract: 2.25
     avg_spread_ticks: 1.0
     avg_daily_volume: 1500000
-    roll_rules:
-      method: calendar
-      roll_days_before_expiry: 8
-      expiry_months: [3, 6, 9, 12]
-      month_codes: [H, M, U, Z]
-    data_file: "ES_full_1min_continuous_UNadjusted_13wjmr/ES_full_1min_continuous_UNadjusted.txt"
-
-  MES:
-    description: "Micro E-mini S&P 500"
-    exchange: CME
-    venue: GLBX
-    asset_class: INDEX
-    currency: USD
-    multiplier: 5
-    tick_size: 0.25
-    tick_value: 1.25
-    price_precision: 2
-    session_hours: "18:00-17:00"
-    margin_init_pct: 0.05
-    margin_maint_pct: 0.04
-    commission_per_contract: 0.62
-    avg_spread_ticks: 1.0
-    avg_daily_volume: 2000000
     roll_rules:
       method: calendar
       roll_days_before_expiry: 8
@@ -70,72 +50,119 @@ instruments:
       expiry_months: [3, 6, 9, 12]
       month_codes: [H, M, U, Z]
 
-  RTY:
-    description: "E-mini Russell 2000"
+  FDAX:
+    description: "DAX 30 Index"
+    exchange: EUREX
+    venue: EUREX
+    asset_class: INDEX
+    currency: EUR
+    multiplier: 25
+    tick_size: 0.50
+    tick_value: 12.50
+    price_precision: 2
+    session_hours: "08:00-22:00"
+    margin_init_pct: 0.07
+    margin_maint_pct: 0.05
+    commission_per_contract: 2.00
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 100000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 5
+      expiry_months: [3, 6, 9, 12]
+      month_codes: [H, M, U, Z]
+
+  NKD:
+    description: "Nikkei 225 Dollar"
     exchange: CME
     venue: GLBX
     asset_class: INDEX
     currency: USD
-    multiplier: 50
-    tick_size: 0.10
-    tick_value: 5.00
-    price_precision: 2
+    multiplier: 5
+    tick_size: 5.0
+    tick_value: 25.00
+    price_precision: 0
     session_hours: "18:00-17:00"
-    margin_init_pct: 0.06
-    margin_maint_pct: 0.05
+    margin_init_pct: 0.08
+    margin_maint_pct: 0.06
     commission_per_contract: 2.25
     avg_spread_ticks: 1.0
-    avg_daily_volume: 250000
+    avg_daily_volume: 30000
     roll_rules:
       method: calendar
       roll_days_before_expiry: 8
       expiry_months: [3, 6, 9, 12]
       month_codes: [H, M, U, Z]
 
-  CL:
-    description: "Crude Oil WTI"
-    exchange: NYMEX
-    venue: GLBX
-    asset_class: COMMODITY
-    currency: USD
-    multiplier: 1000
-    tick_size: 0.01
-    tick_value: 10.00
-    price_precision: 2
-    session_hours: "18:00-17:00"
-    margin_init_pct: 0.10
-    margin_maint_pct: 0.08
-    commission_per_contract: 2.25
+  LFT:
+    description: "FTSE 100 Index"
+    exchange: ICE
+    venue: IFEU
+    asset_class: INDEX
+    currency: GBP
+    multiplier: 10
+    tick_size: 0.5
+    tick_value: 5.00
+    price_precision: 1
+    session_hours: "08:00-21:00"
+    margin_init_pct: 0.06
+    margin_maint_pct: 0.05
+    commission_per_contract: 2.00
     avg_spread_ticks: 1.0
-    avg_daily_volume: 600000
+    avg_daily_volume: 50000
     roll_rules:
       method: calendar
-      roll_days_before_expiry: 10
+      roll_days_before_expiry: 5
+      expiry_months: [3, 6, 9, 12]
+      month_codes: [H, M, U, Z]
+
+  HSI:
+    description: "Hang Seng Index"
+    exchange: HKFE
+    venue: HKFE
+    asset_class: INDEX
+    currency: HKD
+    multiplier: 50
+    tick_size: 1.0
+    tick_value: 50.00
+    price_precision: 0
+    session_hours: "09:15-16:30"
+    margin_init_pct: 0.10
+    margin_maint_pct: 0.08
+    commission_per_contract: 3.00
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 80000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 5
       expiry_months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
       month_codes: [F, G, H, J, K, M, N, Q, U, V, X, Z]
 
-  GC:
-    description: "Gold"
-    exchange: COMEX
-    venue: GLBX
-    asset_class: COMMODITY
-    currency: USD
-    multiplier: 100
-    tick_size: 0.10
-    tick_value: 10.00
-    price_precision: 2
-    session_hours: "18:00-17:00"
-    margin_init_pct: 0.08
-    margin_maint_pct: 0.06
-    commission_per_contract: 2.25
+  YAP:
+    description: "S&P/ASX SPI 200"
+    exchange: ASX
+    venue: ASX
+    asset_class: INDEX
+    currency: AUD
+    multiplier: 25
+    tick_size: 1.0
+    tick_value: 25.00
+    price_precision: 0
+    session_hours: "09:50-16:30"
+    margin_init_pct: 0.06
+    margin_maint_pct: 0.05
+    commission_per_contract: 2.50
     avg_spread_ticks: 1.0
-    avg_daily_volume: 300000
+    avg_daily_volume: 40000
     roll_rules:
       method: calendar
-      roll_days_before_expiry: 10
-      expiry_months: [2, 4, 6, 8, 12]
-      month_codes: [G, J, M, Q, Z]
+      roll_days_before_expiry: 5
+      expiry_months: [3, 6, 9, 12]
+      month_codes: [H, M, U, Z]
 
+  # ===========================================================
+  # DEBT (4)
+  # ===========================================================
   ZN:
     description: "10-Year T-Note"
     exchange: CBOT
@@ -158,6 +185,436 @@ instruments:
       expiry_months: [3, 6, 9, 12]
       month_codes: [H, M, U, Z]
 
+  ZB:
+    description: "30-Year T-Bond"
+    exchange: CBOT
+    venue: GLBX
+    asset_class: DEBT
+    currency: USD
+    multiplier: 1000
+    tick_size: 0.03125
+    tick_value: 31.25
+    price_precision: 5
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.03
+    margin_maint_pct: 0.025
+    commission_per_contract: 1.50
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 400000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 7
+      expiry_months: [3, 6, 9, 12]
+      month_codes: [H, M, U, Z]
+
+  ZF:
+    description: "5-Year T-Note"
+    exchange: CBOT
+    venue: GLBX
+    asset_class: DEBT
+    currency: USD
+    multiplier: 1000
+    tick_size: 0.0078125
+    tick_value: 7.8125
+    price_precision: 7
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.015
+    margin_maint_pct: 0.012
+    commission_per_contract: 1.50
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 800000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 7
+      expiry_months: [3, 6, 9, 12]
+      month_codes: [H, M, U, Z]
+
+  FGBL:
+    description: "Euro Bund"
+    exchange: EUREX
+    venue: EUREX
+    asset_class: DEBT
+    currency: EUR
+    multiplier: 1000
+    tick_size: 0.01
+    tick_value: 10.00
+    price_precision: 2
+    session_hours: "08:00-22:00"
+    margin_init_pct: 0.02
+    margin_maint_pct: 0.015
+    commission_per_contract: 2.00
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 500000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 5
+      expiry_months: [3, 6, 9, 12]
+      month_codes: [H, M, U, Z]
+
+  # ===========================================================
+  # ENERGY (4)
+  # ===========================================================
+  CL:
+    description: "WTI Crude Oil"
+    exchange: NYMEX
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 1000
+    tick_size: 0.01
+    tick_value: 10.00
+    price_precision: 2
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.10
+    margin_maint_pct: 0.08
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 600000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      month_codes: [F, G, H, J, K, M, N, Q, U, V, X, Z]
+
+  NG:
+    description: "Natural Gas"
+    exchange: NYMEX
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 10000
+    tick_size: 0.001
+    tick_value: 10.00
+    price_precision: 3
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.15
+    margin_maint_pct: 0.12
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 300000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      month_codes: [F, G, H, J, K, M, N, Q, U, V, X, Z]
+
+  HO:
+    description: "Heating Oil"
+    exchange: NYMEX
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 42000
+    tick_size: 0.0001
+    tick_value: 4.20
+    price_precision: 4
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.10
+    margin_maint_pct: 0.08
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 150000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      month_codes: [F, G, H, J, K, M, N, Q, U, V, X, Z]
+
+  RB:
+    description: "RBOB Gasoline"
+    exchange: NYMEX
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 42000
+    tick_size: 0.0001
+    tick_value: 4.20
+    price_precision: 4
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.10
+    margin_maint_pct: 0.08
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 120000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      month_codes: [F, G, H, J, K, M, N, Q, U, V, X, Z]
+
+  # ===========================================================
+  # METALS (5)
+  # ===========================================================
+  GC:
+    description: "Gold"
+    exchange: COMEX
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 100
+    tick_size: 0.10
+    tick_value: 10.00
+    price_precision: 2
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.08
+    margin_maint_pct: 0.06
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 300000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [2, 4, 6, 8, 12]
+      month_codes: [G, J, M, Q, Z]
+
+  SI:
+    description: "Silver"
+    exchange: COMEX
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 5000
+    tick_size: 0.005
+    tick_value: 25.00
+    price_precision: 3
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.10
+    margin_maint_pct: 0.08
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 50000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [3, 5, 7, 9, 12]
+      month_codes: [H, K, N, U, Z]
+
+  HG:
+    description: "Copper"
+    exchange: COMEX
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 25000
+    tick_size: 0.0005
+    tick_value: 12.50
+    price_precision: 4
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.08
+    margin_maint_pct: 0.06
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 70000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [3, 5, 7, 9, 12]
+      month_codes: [H, K, N, U, Z]
+
+  PL:
+    description: "Platinum"
+    exchange: NYMEX
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 50
+    tick_size: 0.10
+    tick_value: 5.00
+    price_precision: 1
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.10
+    margin_maint_pct: 0.08
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 15000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [1, 4, 7, 10]
+      month_codes: [F, J, N, V]
+
+  PA:
+    description: "Palladium"
+    exchange: NYMEX
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 100
+    tick_size: 0.05
+    tick_value: 5.00
+    price_precision: 2
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.12
+    margin_maint_pct: 0.10
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 5000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [3, 6, 9, 12]
+      month_codes: [H, M, U, Z]
+
+  # ===========================================================
+  # AGRICULTURE (7)
+  # ===========================================================
+  ZC:
+    description: "Corn"
+    exchange: CBOT
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 50
+    tick_size: 0.25
+    tick_value: 12.50
+    price_precision: 2
+    session_hours: "18:00-14:20"
+    margin_init_pct: 0.08
+    margin_maint_pct: 0.06
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 300000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [3, 5, 7, 9, 12]
+      month_codes: [H, K, N, U, Z]
+
+  ZS:
+    description: "Soybeans"
+    exchange: CBOT
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 50
+    tick_size: 0.25
+    tick_value: 12.50
+    price_precision: 2
+    session_hours: "18:00-14:20"
+    margin_init_pct: 0.06
+    margin_maint_pct: 0.05
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 200000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [1, 3, 5, 7, 8, 9, 11]
+      month_codes: [F, H, K, N, Q, U, X]
+
+  ZW:
+    description: "Wheat"
+    exchange: CBOT
+    venue: GLBX
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 50
+    tick_size: 0.25
+    tick_value: 12.50
+    price_precision: 2
+    session_hours: "18:00-14:20"
+    margin_init_pct: 0.08
+    margin_maint_pct: 0.06
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 100000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [3, 5, 7, 9, 12]
+      month_codes: [H, K, N, U, Z]
+
+  KC:
+    description: "Coffee"
+    exchange: ICE
+    venue: IFUS
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 375
+    tick_size: 0.05
+    tick_value: 18.75
+    price_precision: 2
+    session_hours: "04:15-13:30"
+    margin_init_pct: 0.10
+    margin_maint_pct: 0.08
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 40000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [3, 5, 7, 9, 12]
+      month_codes: [H, K, N, U, Z]
+
+  CT:
+    description: "Cotton #2"
+    exchange: ICE
+    venue: IFUS
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 500
+    tick_size: 0.01
+    tick_value: 5.00
+    price_precision: 2
+    session_hours: "21:00-14:20"
+    margin_init_pct: 0.08
+    margin_maint_pct: 0.06
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 30000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [3, 5, 7, 10, 12]
+      month_codes: [H, K, N, V, Z]
+
+  SB:
+    description: "Sugar #11"
+    exchange: ICE
+    venue: IFUS
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 1120
+    tick_size: 0.01
+    tick_value: 11.20
+    price_precision: 2
+    session_hours: "03:30-13:00"
+    margin_init_pct: 0.10
+    margin_maint_pct: 0.08
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 100000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [3, 5, 7, 10]
+      month_codes: [H, K, N, V]
+
+  CC:
+    description: "Cocoa"
+    exchange: ICE
+    venue: IFUS
+    asset_class: COMMODITY
+    currency: USD
+    multiplier: 10
+    tick_size: 1.0
+    tick_value: 10.00
+    price_precision: 0
+    session_hours: "04:45-13:30"
+    margin_init_pct: 0.10
+    margin_maint_pct: 0.08
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 20000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 10
+      expiry_months: [3, 5, 7, 9, 12]
+      month_codes: [H, K, N, U, Z]
+
+  # ===========================================================
+  # FX (5)
+  # ===========================================================
   6E:
     description: "Euro FX"
     exchange: CME
@@ -174,6 +631,94 @@ instruments:
     commission_per_contract: 2.25
     avg_spread_ticks: 1.0
     avg_daily_volume: 250000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 5
+      expiry_months: [3, 6, 9, 12]
+      month_codes: [H, M, U, Z]
+
+  6J:
+    description: "Japanese Yen FX"
+    exchange: CME
+    venue: GLBX
+    asset_class: FX
+    currency: USD
+    multiplier: 12500000
+    tick_size: 0.0000005
+    tick_value: 6.25
+    price_precision: 7
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.03
+    margin_maint_pct: 0.025
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 150000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 5
+      expiry_months: [3, 6, 9, 12]
+      month_codes: [H, M, U, Z]
+
+  6B:
+    description: "British Pound FX"
+    exchange: CME
+    venue: GLBX
+    asset_class: FX
+    currency: USD
+    multiplier: 62500
+    tick_size: 0.0001
+    tick_value: 6.25
+    price_precision: 4
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.03
+    margin_maint_pct: 0.025
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 100000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 5
+      expiry_months: [3, 6, 9, 12]
+      month_codes: [H, M, U, Z]
+
+  6A:
+    description: "Australian Dollar FX"
+    exchange: CME
+    venue: GLBX
+    asset_class: FX
+    currency: USD
+    multiplier: 100000
+    tick_size: 0.0001
+    tick_value: 10.00
+    price_precision: 4
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.02
+    margin_maint_pct: 0.015
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 120000
+    roll_rules:
+      method: calendar
+      roll_days_before_expiry: 5
+      expiry_months: [3, 6, 9, 12]
+      month_codes: [H, M, U, Z]
+
+  6C:
+    description: "Canadian Dollar FX"
+    exchange: CME
+    venue: GLBX
+    asset_class: FX
+    currency: USD
+    multiplier: 100000
+    tick_size: 0.0001
+    tick_value: 10.00
+    price_precision: 4
+    session_hours: "18:00-17:00"
+    margin_init_pct: 0.02
+    margin_maint_pct: 0.015
+    commission_per_contract: 2.25
+    avg_spread_ticks: 1.0
+    avg_daily_volume: 80000
     roll_rules:
       method: calendar
       roll_days_before_expiry: 5

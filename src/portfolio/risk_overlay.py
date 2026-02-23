@@ -61,6 +61,91 @@ class DrawdownLadder:
         self.recovery_min_sharpe = recovery_min_sharpe
         self.max_cooldown_days = max_cooldown_days
 
+    def get_multiplier_for_dd(self, dd_pct: float) -> float:
+        """Return the ladder multiplier for a given drawdown percentage.
+
+        Parameters
+        ----------
+        dd_pct : float
+            Drawdown as a fraction (e.g. 0.07 = 7%).
+
+        Returns
+        -------
+        float
+            Risk multiplier in [0.0, 1.0].
+        """
+        mult = 1.0
+        for level in self.thresholds:
+            if dd_pct >= level["threshold"]:
+                mult = level["risk_multiplier"]
+        return mult
+
+    def reset_state(self) -> None:
+        """Reset internal stateful tracking for a fresh online pass."""
+        self._peak = None
+        self._in_cooldown = False
+        self._cooldown_remaining = 0
+        self._total_cooldown_elapsed = 0
+        self._cooldown_start_step = 0
+        self._step_count = 0
+
+    def step(self, equity: float) -> float:
+        """Online step: given current equity, return the DD multiplier.
+
+        Must call reset_state() before the first step of a new run.
+
+        Parameters
+        ----------
+        equity : float
+            Current equity value.
+
+        Returns
+        -------
+        float
+            Risk multiplier for this step (0.0 to 1.0).
+        """
+        if self._peak is None:
+            self._peak = equity
+
+        if not self._in_cooldown:
+            self._peak = max(self._peak, equity)
+
+        dd_pct = (self._peak - equity) / self._peak if self._peak > 0 else 0.0
+
+        if self._in_cooldown:
+            self._cooldown_remaining -= 1
+            self._total_cooldown_elapsed += 1
+
+            # Hard max cooldown cap — force re-entry
+            if self._total_cooldown_elapsed >= self.max_cooldown_days:
+                self._in_cooldown = False
+                self._peak = equity
+                self._step_count += 1
+                return 1.0
+
+            if self._cooldown_remaining <= 0:
+                # Simplified recovery: after cooldown expires, re-enter
+                # (full recovery window check requires return history
+                # which the engine provides externally)
+                self._in_cooldown = False
+                self._peak = equity
+                self._step_count += 1
+                return 1.0
+
+            self._step_count += 1
+            return 0.0
+
+        mult = self.get_multiplier_for_dd(dd_pct)
+
+        if mult == 0.0:
+            self._in_cooldown = True
+            self._cooldown_remaining = self.cooldown_days
+            self._total_cooldown_elapsed = 0
+            self._cooldown_start_step = self._step_count
+
+        self._step_count += 1
+        return mult
+
     def compute_risk_multipliers(
         self,
         equity_curve: pd.Series,
@@ -106,11 +191,9 @@ class DrawdownLadder:
                     continue
 
                 if cooldown_remaining <= 0:
-                    # Recovery window starts AFTER cooldown ends (not during DD)
-                    window_start = i
-                    window_end = i
-                    # Look at returns from cooldown end onward (the last few days)
-                    lookback = min(self.recovery_window, i - cooldown_start_idx)
+                    # Recovery window: only look at returns AFTER cooldown ended
+                    cooldown_end_idx = cooldown_start_idx + self.cooldown_days
+                    lookback = min(self.recovery_window, i - cooldown_end_idx)
                     if lookback >= 5:
                         recent_returns = equity_curve.iloc[
                             max(0, i - lookback) : i + 1

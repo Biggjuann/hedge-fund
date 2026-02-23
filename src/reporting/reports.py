@@ -309,3 +309,69 @@ class ReportGenerator:
         df.to_csv(csv_path, index=False)
 
         return csv_path
+
+    def save_strategy_data(
+        self,
+        signals: dict[str, 'StrategySignal'],
+        strategy_returns: dict[str, pd.Series],
+        strategy_weights: dict[str, pd.DataFrame],
+        run_id: str | None = None,
+    ) -> str:
+        """Save per-strategy signals, weights, and returns as a single CSV.
+
+        Columns: date, S1_signal, S1_weight, S1_return, S2_signal, ...
+        """
+        if run_id is None:
+            run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        frames = {}
+        for name, sig in signals.items():
+            prefix = name
+            # Signal: first column of signals df
+            frames[f"{prefix}_signal"] = sig.signals.iloc[:, 0]
+            # Weight: first column of raw_weights df
+            if name in strategy_weights:
+                frames[f"{prefix}_weight"] = strategy_weights[name].iloc[:, 0]
+            else:
+                frames[f"{prefix}_weight"] = sig.raw_weights.iloc[:, 0]
+            # Return
+            if name in strategy_returns:
+                frames[f"{prefix}_return"] = strategy_returns[name]
+
+        df = pd.DataFrame(frames)
+        df.index.name = "date"
+
+        csv_path = os.path.join(
+            self.output_dir, f"strategy_data_{run_id}.csv"
+        )
+        df.to_csv(csv_path)
+        return csv_path
+
+    def save_risk_timeseries(
+        self,
+        dd_multipliers: pd.Series,
+        margin_util: pd.Series,
+        composite_risk: pd.Series,
+        leverage: pd.Series,
+        run_id: str | None = None,
+    ) -> str:
+        """Save risk overlay time series as CSV.
+
+        Columns: date, dd_multiplier, margin_util, composite_risk, leverage
+        """
+        if run_id is None:
+            run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        df = pd.DataFrame({
+            "dd_multiplier": dd_multipliers,
+            "margin_util": margin_util,
+            "composite_risk": composite_risk,
+            "leverage": leverage,
+        })
+        df.index.name = "date"
+
+        csv_path = os.path.join(
+            self.output_dir, f"risk_timeseries_{run_id}.csv"
+        )
+        df.to_csv(csv_path)
+        return csv_path
